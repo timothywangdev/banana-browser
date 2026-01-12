@@ -886,6 +886,7 @@ mod tests {
             full: false,
             headed: false,
             debug: false,
+            executable_path: None,
         }
     }
 

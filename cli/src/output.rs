@@ -1186,6 +1186,7 @@ Snapshot Options:
 
 Options:
   --session <name>           Isolated session (or AGENT_BROWSER_SESSION env)
+  --executable-path <path>   Custom browser executable (or AGENT_BROWSER_EXECUTABLE_PATH)
   --json                     JSON output
   --full, -f                 Full page screenshot
   --headed                   Show browser window (not headless)
