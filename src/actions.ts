@@ -411,6 +411,12 @@ async function handleNavigate(
   browser: BrowserManager
 ): Promise<Response<NavigateData>> {
   const page = browser.getPage();
+
+  // If headers are provided, set up scoped headers for this origin
+  if (command.headers && Object.keys(command.headers).length > 0) {
+    await browser.setScopedHeaders(command.url, command.headers);
+  }
+
   await page.goto(command.url, {
     waitUntil: command.waitUntil ?? 'load',
   });

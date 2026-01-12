@@ -162,12 +162,15 @@ Aliases: goto, navigate
 Global Options:
   --json               Output as JSON
   --session <name>     Use specific session
+  --headers <json>     Set HTTP headers (scoped to this origin)
   --headed             Show browser window
 
 Examples:
   agent-browser open example.com
   agent-browser open https://github.com
   agent-browser open localhost:3000
+  agent-browser open api.example.com --headers '{"Authorization": "Bearer token"}'
+    # ^ Headers only sent to api.example.com, not other domains
 "##,
         "back" => r##"
 agent-browser back - Navigate back in history
@@ -1186,6 +1189,7 @@ Snapshot Options:
 
 Options:
   --session <name>           Isolated session (or AGENT_BROWSER_SESSION env)
+  --headers <json>           HTTP headers scoped to URL's origin (for auth)
   --executable-path <path>   Custom browser executable (or AGENT_BROWSER_EXECUTABLE_PATH)
   --json                     JSON output
   --full, -f                 Full page screenshot

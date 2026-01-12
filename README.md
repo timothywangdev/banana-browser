@@ -293,6 +293,7 @@ agent-browser snapshot -i -c -d 5         # Combine options
 | Option | Description |
 |--------|-------------|
 | `--session <name>` | Use isolated session (or `AGENT_BROWSER_SESSION` env) |
+| `--headers <json>` | Set HTTP headers scoped to the URL's origin |
 | `--executable-path <path>` | Custom browser executable (or `AGENT_BROWSER_EXECUTABLE_PATH` env) |
 | `--json` | JSON output (for agents) |
 | `--full, -f` | Full page screenshot |
@@ -387,6 +388,41 @@ agent-browser open example.com --headed
 ```
 
 This opens a visible browser window instead of running headless.
+
+## Authenticated Sessions
+
+Use `--headers` to set HTTP headers for a specific origin, enabling authentication without login flows:
+
+```bash
+# Headers are scoped to api.example.com only
+agent-browser open api.example.com --headers '{"Authorization": "Bearer <token>"}'
+
+# Requests to api.example.com include the auth header
+agent-browser snapshot -i --json
+agent-browser click @e2
+
+# Navigate to another domain - headers are NOT sent (safe!)
+agent-browser open other-site.com
+```
+
+This is useful for:
+- **Skipping login flows** - Authenticate via headers instead of UI
+- **Switching users** - Start new sessions with different auth tokens
+- **API testing** - Access protected endpoints directly
+- **Security** - Headers are scoped to the origin, not leaked to other domains
+
+To set headers for multiple origins, use `--headers` with each `open` command:
+
+```bash
+agent-browser open api.example.com --headers '{"Authorization": "Bearer token1"}'
+agent-browser open api.acme.com --headers '{"Authorization": "Bearer token2"}'
+```
+
+For global headers (all domains), use `set headers`:
+
+```bash
+agent-browser set headers '{"X-Custom-Header": "value"}'
+```
 
 ## Custom Browser Executable
 

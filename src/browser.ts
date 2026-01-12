@@ -51,6 +51,7 @@ export class BrowserManager {
   private isRecordingHar: boolean = false;
   private refMap: RefMap = {};
   private lastSnapshot: string = '';
+  private scopedHeaderRoutes: Map<string, (route: Route) => Promise<void>> = new Map();
 
   /**
    * Check if browser is launched
@@ -439,12 +440,82 @@ export class BrowserManager {
   }
 
   /**
-   * Set extra HTTP headers
+   * Set extra HTTP headers (global - all requests)
    */
   async setExtraHeaders(headers: Record<string, string>): Promise<void> {
     const context = this.contexts[0];
     if (context) {
       await context.setExtraHTTPHeaders(headers);
+    }
+  }
+
+  /**
+   * Set scoped HTTP headers (only for requests matching the origin)
+   * Uses route interception to add headers only to matching requests
+   */
+  async setScopedHeaders(origin: string, headers: Record<string, string>): Promise<void> {
+    const page = this.getPage();
+
+    // Build URL pattern from origin (e.g., "api.example.com" -> "**://api.example.com/**")
+    // Handle both full URLs and just hostnames
+    let urlPattern: string;
+    try {
+      const url = new URL(origin.startsWith('http') ? origin : `https://${origin}`);
+      // Match any protocol, the host, and any path
+      urlPattern = `**://${url.host}/**`;
+    } catch {
+      // If parsing fails, treat as hostname pattern
+      urlPattern = `**://${origin}/**`;
+    }
+
+    // Remove existing route for this origin if any
+    const existingHandler = this.scopedHeaderRoutes.get(urlPattern);
+    if (existingHandler) {
+      await page.unroute(urlPattern, existingHandler);
+    }
+
+    // Create handler that adds headers to matching requests
+    const handler = async (route: Route) => {
+      const requestHeaders = route.request().headers();
+      await route.continue({
+        headers: {
+          ...requestHeaders,
+          ...headers,
+        },
+      });
+    };
+
+    // Store and register the route
+    this.scopedHeaderRoutes.set(urlPattern, handler);
+    await page.route(urlPattern, handler);
+  }
+
+  /**
+   * Clear scoped headers for an origin (or all if no origin specified)
+   */
+  async clearScopedHeaders(origin?: string): Promise<void> {
+    const page = this.getPage();
+
+    if (origin) {
+      let urlPattern: string;
+      try {
+        const url = new URL(origin.startsWith('http') ? origin : `https://${origin}`);
+        urlPattern = `**://${url.host}/**`;
+      } catch {
+        urlPattern = `**://${origin}/**`;
+      }
+
+      const handler = this.scopedHeaderRoutes.get(urlPattern);
+      if (handler) {
+        await page.unroute(urlPattern, handler);
+        this.scopedHeaderRoutes.delete(urlPattern);
+      }
+    } else {
+      // Clear all scoped header routes
+      for (const [pattern, handler] of this.scopedHeaderRoutes) {
+        await page.unroute(pattern, handler);
+      }
+      this.scopedHeaderRoutes.clear();
     }
   }
 
@@ -523,9 +594,10 @@ export class BrowserManager {
       executablePath: options.executablePath,
     });
 
-    // Create context with viewport
+    // Create context with viewport and optional headers
     const context = await this.browser.newContext({
       viewport: options.viewport ?? { width: 1280, height: 720 },
+      extraHTTPHeaders: options.headers,
     });
 
     // Set default timeout to 10 seconds (Playwright default is 30s)

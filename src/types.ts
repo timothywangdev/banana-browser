@@ -12,6 +12,7 @@ export interface LaunchCommand extends BaseCommand {
   headless?: boolean;
   viewport?: { width: number; height: number };
   browser?: 'chromium' | 'firefox' | 'webkit';
+  headers?: Record<string, string>;
   executablePath?: string;
 }
 
@@ -19,6 +20,7 @@ export interface NavigateCommand extends BaseCommand {
   action: 'navigate';
   url: string;
   waitUntil?: 'load' | 'domcontentloaded' | 'networkidle';
+  headers?: Record<string, string>;
 }
 
 export interface ClickCommand extends BaseCommand {
