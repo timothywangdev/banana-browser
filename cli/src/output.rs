@@ -215,6 +215,10 @@ Debug:
   errors [--clear]           View page errors
   highlight <sel>            Highlight element
 
+Sessions:
+  session                    Show current session name
+  session list               List active sessions
+
 Setup:
   install                    Install browser binaries
   install --with-deps        Also install system dependencies (Linux)
