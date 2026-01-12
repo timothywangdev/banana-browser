@@ -436,15 +436,15 @@ Core workflow:
 For Claude Code, a [skill](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices) provides richer context:
 
 ```bash
-cp -r node_modules/agent-browser/skills/browsing-web .claude/skills/
+cp -r node_modules/agent-browser/skills/agent-browser .claude/skills/
 ```
 
 Or download:
 
 ```bash
-mkdir -p .claude/skills/browsing-web
-curl -o .claude/skills/browsing-web/SKILL.md \
-  https://raw.githubusercontent.com/vercel-labs/agent-browser/main/skills/browsing-web/SKILL.md
+mkdir -p .claude/skills/agent-browser
+curl -o .claude/skills/agent-browser/SKILL.md \
+  https://raw.githubusercontent.com/vercel-labs/agent-browser/main/skills/agent-browser/SKILL.md
 ```
 
 ## License
