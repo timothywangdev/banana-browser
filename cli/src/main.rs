@@ -8,7 +8,7 @@ use serde_json::json;
 use std::env;
 use std::process::exit;
 
-use commands::{gen_id, parse_command};
+use commands::{gen_id, parse_command, ParseError};
 use connection::{ensure_daemon, send_command};
 use flags::{clean_args, parse_flags};
 use install::run_install;
@@ -32,13 +32,22 @@ fn main() {
     }
 
     let cmd = match parse_command(&clean, &flags) {
-        Some(c) => c,
-        None => {
-            eprintln!(
-                "\x1b[31mUnknown command:\x1b[0m {}",
-                clean.get(0).unwrap_or(&String::new())
-            );
-            eprintln!("\x1b[2mRun: agent-browser --help\x1b[0m");
+        Ok(c) => c,
+        Err(e) => {
+            if flags.json {
+                let error_type = match &e {
+                    ParseError::UnknownCommand { .. } => "unknown_command",
+                    ParseError::UnknownSubcommand { .. } => "unknown_subcommand",
+                    ParseError::MissingArguments { .. } => "missing_arguments",
+                };
+                println!(
+                    r#"{{"success":false,"error":"{}","type":"{}"}}"#,
+                    e.format().replace('\n', " "),
+                    error_type
+                );
+            } else {
+                eprintln!("\x1b[31m{}\x1b[0m", e.format());
+            }
             exit(1);
         }
     };
