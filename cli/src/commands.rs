@@ -212,6 +212,44 @@ pub fn parse_command(args: &[String], flags: &Flags) -> Result<Value, ParseError
 
         // === Wait ===
         "wait" => {
+            // Check for --url flag: wait --url "**/dashboard"
+            if let Some(idx) = rest.iter().position(|&s| s == "--url" || s == "-u") {
+                let url = rest.get(idx + 1).ok_or_else(|| ParseError::MissingArguments {
+                    context: "wait --url".to_string(),
+                    usage: "wait --url <pattern>",
+                })?;
+                return Ok(json!({ "id": id, "action": "waitforurl", "url": url }));
+            }
+            
+            // Check for --load flag: wait --load networkidle
+            if let Some(idx) = rest.iter().position(|&s| s == "--load" || s == "-l") {
+                let state = rest.get(idx + 1).ok_or_else(|| ParseError::MissingArguments {
+                    context: "wait --load".to_string(),
+                    usage: "wait --load <state>",
+                })?;
+                return Ok(json!({ "id": id, "action": "waitforloadstate", "state": state }));
+            }
+            
+            // Check for --fn flag: wait --fn "window.ready === true"
+            if let Some(idx) = rest.iter().position(|&s| s == "--fn" || s == "-f") {
+                let expr = rest.get(idx + 1).ok_or_else(|| ParseError::MissingArguments {
+                    context: "wait --fn".to_string(),
+                    usage: "wait --fn <expression>",
+                })?;
+                return Ok(json!({ "id": id, "action": "waitforfunction", "expression": expr }));
+            }
+            
+            // Check for --text flag: wait --text "Welcome"
+            if let Some(idx) = rest.iter().position(|&s| s == "--text" || s == "-t") {
+                let text = rest.get(idx + 1).ok_or_else(|| ParseError::MissingArguments {
+                    context: "wait --text".to_string(),
+                    usage: "wait --text <text>",
+                })?;
+                // Use getByText locator to wait for text to appear
+                return Ok(json!({ "id": id, "action": "wait", "selector": format!("text={}", text) }));
+            }
+            
+            // Default: selector or timeout
             if let Some(arg) = rest.get(0) {
                 if arg.parse::<u64>().is_ok() {
                     Ok(json!({ "id": id, "action": "wait", "timeout": arg.parse::<u64>().unwrap() }))
@@ -221,7 +259,7 @@ pub fn parse_command(args: &[String], flags: &Flags) -> Result<Value, ParseError
             } else {
                 Err(ParseError::MissingArguments {
                     context: "wait".to_string(),
-                    usage: "wait <selector|ms>",
+                    usage: "wait <selector|ms|--url|--load|--fn|--text>",
                 })
             }
         }
@@ -1088,6 +1126,57 @@ mod tests {
         let cmd = parse_command(&args("snapshot -d 3"), &default_flags()).unwrap();
         assert_eq!(cmd["action"], "snapshot");
         assert_eq!(cmd["maxDepth"], 3);
+    }
+
+    // === Wait ===
+
+    #[test]
+    fn test_wait_selector() {
+        let cmd = parse_command(&args("wait #element"), &default_flags()).unwrap();
+        assert_eq!(cmd["action"], "wait");
+        assert_eq!(cmd["selector"], "#element");
+    }
+
+    #[test]
+    fn test_wait_timeout() {
+        let cmd = parse_command(&args("wait 5000"), &default_flags()).unwrap();
+        assert_eq!(cmd["action"], "wait");
+        assert_eq!(cmd["timeout"], 5000);
+    }
+
+    #[test]
+    fn test_wait_url() {
+        let cmd = parse_command(&args("wait --url **/dashboard"), &default_flags()).unwrap();
+        assert_eq!(cmd["action"], "waitforurl");
+        assert_eq!(cmd["url"], "**/dashboard");
+    }
+
+    #[test]
+    fn test_wait_load() {
+        let cmd = parse_command(&args("wait --load networkidle"), &default_flags()).unwrap();
+        assert_eq!(cmd["action"], "waitforloadstate");
+        assert_eq!(cmd["state"], "networkidle");
+    }
+
+    #[test]
+    fn test_wait_load_missing_state() {
+        let result = parse_command(&args("wait --load"), &default_flags());
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), ParseError::MissingArguments { .. }));
+    }
+
+    #[test]
+    fn test_wait_fn() {
+        let cmd = parse_command(&args("wait --fn window.ready"), &default_flags()).unwrap();
+        assert_eq!(cmd["action"], "waitforfunction");
+        assert_eq!(cmd["expression"], "window.ready");
+    }
+
+    #[test]
+    fn test_wait_text() {
+        let cmd = parse_command(&args("wait --text Welcome"), &default_flags()).unwrap();
+        assert_eq!(cmd["action"], "wait");
+        assert_eq!(cmd["selector"], "text=Welcome");
     }
 
     // === Unknown command ===
