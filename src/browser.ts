@@ -11,11 +11,36 @@ import {
   type Request,
   type Route,
   type Locator,
+  type CDPSession,
 } from 'playwright-core';
 import path from 'node:path';
 import os from 'node:os';
 import type { LaunchCommand } from './types.js';
 import { type RefMap, type EnhancedSnapshot, getEnhancedSnapshot, parseRef } from './snapshot.js';
+
+// Screencast frame data from CDP
+export interface ScreencastFrame {
+  data: string; // base64 encoded image
+  metadata: {
+    offsetTop: number;
+    pageScaleFactor: number;
+    deviceWidth: number;
+    deviceHeight: number;
+    scrollOffsetX: number;
+    scrollOffsetY: number;
+    timestamp?: number;
+  };
+  sessionId: number;
+}
+
+// Screencast options
+export interface ScreencastOptions {
+  format?: 'jpeg' | 'png';
+  quality?: number; // 0-100, only for jpeg
+  maxWidth?: number;
+  maxHeight?: number;
+  everyNthFrame?: number;
+}
 
 interface TrackedRequest {
   url: string;
@@ -56,6 +81,13 @@ export class BrowserManager {
   private refMap: RefMap = {};
   private lastSnapshot: string = '';
   private scopedHeaderRoutes: Map<string, (route: Route) => Promise<void>> = new Map();
+
+  // CDP session for screencast and input injection
+  private cdpSession: CDPSession | null = null;
+  private screencastActive: boolean = false;
+  private screencastSessionId: number = 0;
+  private frameCallback: ((frame: ScreencastFrame) => void) | null = null;
+  private screencastFrameHandler: ((params: any) => void) | null = null;
 
   /**
    * Check if browser is launched
@@ -768,6 +800,9 @@ export class BrowserManager {
       throw new Error('Browser not launched');
     }
 
+    // Invalidate CDP session since we're switching to a new page
+    await this.invalidateCDPSession();
+
     const context = this.contexts[0]; // Use first context for tabs
     const page = await context.newPage();
     this.pages.push(page);
@@ -807,11 +842,33 @@ export class BrowserManager {
   }
 
   /**
+   * Invalidate the current CDP session (must be called before switching pages)
+   * This ensures screencast and input injection work correctly after tab switch
+   */
+  private async invalidateCDPSession(): Promise<void> {
+    // Stop screencast if active (it's tied to the current page's CDP session)
+    if (this.screencastActive) {
+      await this.stopScreencast();
+    }
+
+    // Detach and clear the CDP session
+    if (this.cdpSession) {
+      await this.cdpSession.detach().catch(() => {});
+      this.cdpSession = null;
+    }
+  }
+
+  /**
    * Switch to a specific tab/page by index
    */
-  switchTo(index: number): { index: number; url: string; title: string } {
+  async switchTo(index: number): Promise<{ index: number; url: string; title: string }> {
     if (index < 0 || index >= this.pages.length) {
       throw new Error(`Invalid tab index: ${index}. Available: 0-${this.pages.length - 1}`);
+    }
+
+    // Invalidate CDP session before switching (it's page-specific)
+    if (index !== this.activePageIndex) {
+      await this.invalidateCDPSession();
     }
 
     this.activePageIndex = index;
@@ -836,6 +893,11 @@ export class BrowserManager {
 
     if (this.pages.length === 1) {
       throw new Error('Cannot close the last tab. Use "close" to close the browser.');
+    }
+
+    // If closing the active tab, invalidate CDP session first
+    if (targetIndex === this.activePageIndex) {
+      await this.invalidateCDPSession();
     }
 
     const page = this.pages[targetIndex];
@@ -868,9 +930,194 @@ export class BrowserManager {
   }
 
   /**
+   * Get or create a CDP session for the current page
+   * Only works with Chromium-based browsers
+   */
+  async getCDPSession(): Promise<CDPSession> {
+    if (this.cdpSession) {
+      return this.cdpSession;
+    }
+
+    const page = this.getPage();
+    const context = page.context();
+
+    // Create a new CDP session attached to the page
+    this.cdpSession = await context.newCDPSession(page);
+    return this.cdpSession;
+  }
+
+  /**
+   * Check if screencast is currently active
+   */
+  isScreencasting(): boolean {
+    return this.screencastActive;
+  }
+
+  /**
+   * Start screencast - streams viewport frames via CDP
+   * @param callback Function called for each frame
+   * @param options Screencast options
+   */
+  async startScreencast(
+    callback: (frame: ScreencastFrame) => void,
+    options?: ScreencastOptions
+  ): Promise<void> {
+    if (this.screencastActive) {
+      throw new Error('Screencast already active');
+    }
+
+    const cdp = await this.getCDPSession();
+    this.frameCallback = callback;
+    this.screencastActive = true;
+
+    // Create and store the frame handler so we can remove it later
+    this.screencastFrameHandler = async (params: any) => {
+      const frame: ScreencastFrame = {
+        data: params.data,
+        metadata: params.metadata,
+        sessionId: params.sessionId,
+      };
+
+      // Acknowledge the frame to receive the next one
+      await cdp.send('Page.screencastFrameAck', { sessionId: params.sessionId });
+
+      // Call the callback with the frame
+      if (this.frameCallback) {
+        this.frameCallback(frame);
+      }
+    };
+
+    // Listen for screencast frames
+    cdp.on('Page.screencastFrame', this.screencastFrameHandler);
+
+    // Start the screencast
+    await cdp.send('Page.startScreencast', {
+      format: options?.format ?? 'jpeg',
+      quality: options?.quality ?? 80,
+      maxWidth: options?.maxWidth ?? 1280,
+      maxHeight: options?.maxHeight ?? 720,
+      everyNthFrame: options?.everyNthFrame ?? 1,
+    });
+  }
+
+  /**
+   * Stop screencast
+   */
+  async stopScreencast(): Promise<void> {
+    if (!this.screencastActive) {
+      return;
+    }
+
+    try {
+      const cdp = await this.getCDPSession();
+      await cdp.send('Page.stopScreencast');
+
+      // Remove the event listener to prevent accumulation
+      if (this.screencastFrameHandler) {
+        cdp.off('Page.screencastFrame', this.screencastFrameHandler);
+      }
+    } catch {
+      // Ignore errors when stopping
+    }
+
+    this.screencastActive = false;
+    this.frameCallback = null;
+    this.screencastFrameHandler = null;
+  }
+
+  /**
+   * Inject a mouse event via CDP
+   */
+  async injectMouseEvent(params: {
+    type: 'mousePressed' | 'mouseReleased' | 'mouseMoved' | 'mouseWheel';
+    x: number;
+    y: number;
+    button?: 'left' | 'right' | 'middle' | 'none';
+    clickCount?: number;
+    deltaX?: number;
+    deltaY?: number;
+    modifiers?: number; // 1=Alt, 2=Ctrl, 4=Meta, 8=Shift
+  }): Promise<void> {
+    const cdp = await this.getCDPSession();
+
+    const cdpButton =
+      params.button === 'left'
+        ? 'left'
+        : params.button === 'right'
+          ? 'right'
+          : params.button === 'middle'
+            ? 'middle'
+            : 'none';
+
+    await cdp.send('Input.dispatchMouseEvent', {
+      type: params.type,
+      x: params.x,
+      y: params.y,
+      button: cdpButton,
+      clickCount: params.clickCount ?? 1,
+      deltaX: params.deltaX ?? 0,
+      deltaY: params.deltaY ?? 0,
+      modifiers: params.modifiers ?? 0,
+    });
+  }
+
+  /**
+   * Inject a keyboard event via CDP
+   */
+  async injectKeyboardEvent(params: {
+    type: 'keyDown' | 'keyUp' | 'char';
+    key?: string;
+    code?: string;
+    text?: string;
+    modifiers?: number; // 1=Alt, 2=Ctrl, 4=Meta, 8=Shift
+  }): Promise<void> {
+    const cdp = await this.getCDPSession();
+
+    await cdp.send('Input.dispatchKeyEvent', {
+      type: params.type,
+      key: params.key,
+      code: params.code,
+      text: params.text,
+      modifiers: params.modifiers ?? 0,
+    });
+  }
+
+  /**
+   * Inject touch event via CDP (for mobile emulation)
+   */
+  async injectTouchEvent(params: {
+    type: 'touchStart' | 'touchEnd' | 'touchMove' | 'touchCancel';
+    touchPoints: Array<{ x: number; y: number; id?: number }>;
+    modifiers?: number;
+  }): Promise<void> {
+    const cdp = await this.getCDPSession();
+
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: params.type,
+      touchPoints: params.touchPoints.map((tp, i) => ({
+        x: tp.x,
+        y: tp.y,
+        id: tp.id ?? i,
+      })),
+      modifiers: params.modifiers ?? 0,
+    });
+  }
+
+  /**
    * Close the browser and clean up
    */
   async close(): Promise<void> {
+    // Stop screencast if active
+    if (this.screencastActive) {
+      await this.stopScreencast();
+    }
+
+    // Clean up CDP session
+    if (this.cdpSession) {
+      await this.cdpSession.detach().catch(() => {});
+      this.cdpSession = null;
+    }
+
     // CDP: only disconnect, don't close external app's pages
     if (this.cdpPort !== null) {
       if (this.browser) {
@@ -898,5 +1145,6 @@ export class BrowserManager {
     this.activePageIndex = 0;
     this.refMap = {};
     this.lastSnapshot = '';
+    this.frameCallback = null;
   }
 }
