@@ -682,6 +682,7 @@ export class BrowserManager {
           args: [`--disable-extensions-except=${extPaths}`, `--load-extension=${extPaths}`],
           viewport,
           extraHTTPHeaders: options.headers,
+          ...(options.proxy && { proxy: options.proxy }),
         }
       );
       this.isPersistentContext = true;
@@ -691,10 +692,14 @@ export class BrowserManager {
         executablePath: options.executablePath,
       });
       this.cdpPort = null;
-      context = await this.browser.newContext({ viewport, extraHTTPHeaders: options.headers });
+      context = await this.browser.newContext({
+        viewport,
+        extraHTTPHeaders: options.headers,
+        ...(options.proxy && { proxy: options.proxy }),
+      });
     }
 
-    context.setDefaultTimeout(10000);
+    context.setDefaultTimeout(60000);
     this.contexts.push(context);
 
     const page = context.pages()[0] ?? (await context.newPage());
@@ -828,7 +833,7 @@ export class BrowserManager {
     const context = await this.browser.newContext({
       viewport: viewport ?? { width: 1280, height: 720 },
     });
-    context.setDefaultTimeout(10000);
+    context.setDefaultTimeout(60000);
     this.contexts.push(context);
 
     const page = await context.newPage();
