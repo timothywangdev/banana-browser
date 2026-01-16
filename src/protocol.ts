@@ -315,6 +315,23 @@ const videoStopSchema = baseCommandSchema.extend({
   action: z.literal('video_stop'),
 });
 
+// Recording schemas (Playwright native video recording)
+const recordingStartSchema = baseCommandSchema.extend({
+  action: z.literal('recording_start'),
+  path: z.string().min(1),
+  url: z.string().min(1).optional(),
+});
+
+const recordingStopSchema = baseCommandSchema.extend({
+  action: z.literal('recording_stop'),
+});
+
+const recordingRestartSchema = baseCommandSchema.extend({
+  action: z.literal('recording_restart'),
+  path: z.string().min(1),
+  url: z.string().min(1).optional(),
+});
+
 const traceStartSchema = baseCommandSchema.extend({
   action: z.literal('trace_start'),
   screenshots: z.boolean().optional(),
@@ -804,6 +821,9 @@ const commandSchema = z.discriminatedUnion('action', [
   boundingBoxSchema,
   videoStartSchema,
   videoStopSchema,
+  recordingStartSchema,
+  recordingStopSchema,
+  recordingRestartSchema,
   traceStartSchema,
   traceStopSchema,
   harStartSchema,

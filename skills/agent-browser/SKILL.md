@@ -90,6 +90,15 @@ agent-browser screenshot --full   # Full page
 agent-browser pdf output.pdf      # Save as PDF
 ```
 
+### Video recording
+```bash
+agent-browser record start ./demo.webm    # Start recording (uses current URL + state)
+agent-browser click @e1                   # Perform actions
+agent-browser record stop                 # Stop and save video
+agent-browser record restart ./take2.webm # Stop current + start new recording
+```
+Recording creates a fresh context but preserves cookies/storage from your session. If no URL is provided, it automatically returns to your current page. For smooth demos, explore first, then start recording.
+
 ### Wait
 ```bash
 agent-browser wait @e1                     # Wait for element
@@ -225,6 +234,11 @@ agent-browser get text @e1 --json
 ## Debugging
 
 ```bash
+agent-browser open example.com --headed              # Show browser window
+agent-browser console                                # View console messages
+agent-browser errors                                 # View page errors
+agent-browser record start ./debug.webm   # Record from current page
+agent-browser record stop                            # Save recording
 agent-browser open example.com --headed  # Show browser window
 agent-browser --cdp 9222 snapshot        # Connect via CDP
 agent-browser console                    # View console messages

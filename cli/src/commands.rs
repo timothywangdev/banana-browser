@@ -443,6 +443,60 @@ pub fn parse_command(args: &[String], flags: &Flags) -> Result<Value, ParseError
                 }),
             }
         }
+
+        // === Recording (Playwright native video recording) ===
+        "record" => {
+            const VALID: &[&str] = &["start", "stop", "restart"];
+            match rest.get(0).map(|s| *s) {
+                Some("start") => {
+                    let path = rest.get(1).ok_or_else(|| ParseError::MissingArguments {
+                        context: "record start".to_string(),
+                        usage: "record start <output.webm> [url]",
+                    })?;
+                    // Optional URL parameter
+                    let url = rest.get(2);
+                    let mut cmd = json!({ "id": id, "action": "recording_start", "path": path });
+                    if let Some(u) = url {
+                        // Add https:// prefix if needed
+                        let url_str = if u.starts_with("http") {
+                            u.to_string()
+                        } else {
+                            format!("https://{}", u)
+                        };
+                        cmd["url"] = json!(url_str);
+                    }
+                    Ok(cmd)
+                }
+                Some("stop") => Ok(json!({ "id": id, "action": "recording_stop" })),
+                Some("restart") => {
+                    let path = rest.get(1).ok_or_else(|| ParseError::MissingArguments {
+                        context: "record restart".to_string(),
+                        usage: "record restart <output.webm> [url]",
+                    })?;
+                    // Optional URL parameter
+                    let url = rest.get(2);
+                    let mut cmd = json!({ "id": id, "action": "recording_restart", "path": path });
+                    if let Some(u) = url {
+                        // Add https:// prefix if needed
+                        let url_str = if u.starts_with("http") {
+                            u.to_string()
+                        } else {
+                            format!("https://{}", u)
+                        };
+                        cmd["url"] = json!(url_str);
+                    }
+                    Ok(cmd)
+                }
+                Some(sub) => Err(ParseError::UnknownSubcommand {
+                    subcommand: sub.to_string(),
+                    valid_options: VALID,
+                }),
+                None => Err(ParseError::MissingArguments {
+                    context: "record".to_string(),
+                    usage: "record <start|stop|restart> [path] [url]",
+                }),
+            }
+        }
         "console" => {
             let clear = rest.iter().any(|&s| s == "--clear");
             Ok(json!({ "id": id, "action": "console", "clear": clear }))
@@ -1273,6 +1327,82 @@ mod tests {
     }
 
     // === Unknown command ===
+
+    // === Record Tests ===
+
+    #[test]
+    fn test_record_start() {
+        let cmd = parse_command(&args("record start output.webm"), &default_flags()).unwrap();
+        assert_eq!(cmd["action"], "recording_start");
+        assert_eq!(cmd["path"], "output.webm");
+        assert!(cmd.get("url").is_none());
+    }
+
+    #[test]
+    fn test_record_start_with_url() {
+        let cmd = parse_command(&args("record start demo.webm https://example.com"), &default_flags()).unwrap();
+        assert_eq!(cmd["action"], "recording_start");
+        assert_eq!(cmd["path"], "demo.webm");
+        assert_eq!(cmd["url"], "https://example.com");
+    }
+
+    #[test]
+    fn test_record_start_with_url_no_protocol() {
+        let cmd = parse_command(&args("record start demo.webm example.com"), &default_flags()).unwrap();
+        assert_eq!(cmd["action"], "recording_start");
+        assert_eq!(cmd["path"], "demo.webm");
+        assert_eq!(cmd["url"], "https://example.com");
+    }
+
+    #[test]
+    fn test_record_start_missing_path() {
+        let result = parse_command(&args("record start"), &default_flags());
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), ParseError::MissingArguments { .. }));
+    }
+
+    #[test]
+    fn test_record_stop() {
+        let cmd = parse_command(&args("record stop"), &default_flags()).unwrap();
+        assert_eq!(cmd["action"], "recording_stop");
+    }
+
+    #[test]
+    fn test_record_restart() {
+        let cmd = parse_command(&args("record restart output.webm"), &default_flags()).unwrap();
+        assert_eq!(cmd["action"], "recording_restart");
+        assert_eq!(cmd["path"], "output.webm");
+        assert!(cmd.get("url").is_none());
+    }
+
+    #[test]
+    fn test_record_restart_with_url() {
+        let cmd = parse_command(&args("record restart demo.webm https://example.com"), &default_flags()).unwrap();
+        assert_eq!(cmd["action"], "recording_restart");
+        assert_eq!(cmd["path"], "demo.webm");
+        assert_eq!(cmd["url"], "https://example.com");
+    }
+
+    #[test]
+    fn test_record_restart_missing_path() {
+        let result = parse_command(&args("record restart"), &default_flags());
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), ParseError::MissingArguments { .. }));
+    }
+
+    #[test]
+    fn test_record_invalid_subcommand() {
+        let result = parse_command(&args("record foo"), &default_flags());
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), ParseError::UnknownSubcommand { .. }));
+    }
+
+    #[test]
+    fn test_record_missing_subcommand() {
+        let result = parse_command(&args("record"), &default_flags());
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), ParseError::MissingArguments { .. }));
+    }
 
     #[test]
     fn test_unknown_command() {
