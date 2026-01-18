@@ -9,6 +9,12 @@ pub fn run_install(with_deps: bool) {
             println!("{}", color::cyan("Installing system dependencies..."));
 
             let (pkg_mgr, deps) = if which_exists("apt-get") {
+                let libasound = if package_exists_apt("libasound2t64") {
+                    "libasound2t64"
+                } else {
+                    "libasound2"
+                };
+
                 (
                     "apt-get",
                     vec![
@@ -31,7 +37,7 @@ pub fn run_install(with_deps: bool) {
                         "libcairo2",
                         "libgdk-pixbuf-2.0-0",
                         "libxrender1",
-                        "libasound2",
+                        libasound,
                         "libfreetype6",
                         "libfontconfig1",
                         "libdbus-1-3",
@@ -190,4 +196,15 @@ fn which_exists(cmd: &str) -> bool {
             .map(|s| s.success())
             .unwrap_or(false)
     }
+}
+
+fn package_exists_apt(pkg: &str) -> bool {
+    Command::new("apt-cache")
+        .arg("show")
+        .arg(pkg)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
