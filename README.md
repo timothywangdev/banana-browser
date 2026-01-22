@@ -654,13 +654,22 @@ Core workflow:
 
 ### Claude Code Skill
 
-For Claude Code, a [skill](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices) provides richer context:
+For Claude Code, a [skill](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices) provides richer context.
+
+**Plugin (recommended):**
+
+```bash
+/plugin marketplace add vercel-labs/agent-browser
+/plugin install agent-browser
+```
+
+**Manual install:**
 
 ```bash
 cp -r node_modules/agent-browser/skills/agent-browser .claude/skills/
 ```
 
-Or download:
+Or download directly:
 
 ```bash
 mkdir -p .claude/skills/agent-browser
