@@ -1,7 +1,7 @@
 use crate::color;
 use crate::connection::Response;
 
-pub fn print_response(resp: &Response, json_mode: bool) {
+pub fn print_response(resp: &Response, json_mode: bool, action: Option<&str>) {
     if json_mode {
         println!("{}", serde_json::to_string(resp).unwrap_or_default());
         return;
@@ -135,7 +135,7 @@ pub fn print_response(resp: &Response, json_mode: bool) {
         // Cleared requests
         if let Some(cleared) = data.get("cleared").and_then(|v| v.as_bool()) {
             if cleared {
-                println!("\x1b[32m✓\x1b[0m Request log cleared");
+                println!("{} Request log cleared", color::success_indicator());
                 return;
             }
         }
@@ -235,14 +235,42 @@ pub fn print_response(resp: &Response, json_mode: bool) {
                 return;
             }
         }
-        // Screenshot path (no "started", "frames", or download fields)
-        if let Some(path) = data.get("path").and_then(|v| v.as_str()) {
-            println!("{} Screenshot saved to {}", color::success_indicator(), color::green(path));
-            return;
-        }
         // Screenshot base64
         if let Some(base64) = data.get("base64").and_then(|v| v.as_str()) {
             println!("{}", base64);
+            return;
+        }
+        // Path-based operations (screenshot/pdf/trace/har/download/state/video)
+        if let Some(path) = data.get("path").and_then(|v| v.as_str()) {
+            match action.unwrap_or("") {
+                "screenshot" => println!("{} Screenshot saved to {}", color::success_indicator(), color::green(path)),
+                "pdf" => println!("{} PDF saved to {}", color::success_indicator(), color::green(path)),
+                "trace_stop" => println!("{} Trace saved to {}", color::success_indicator(), color::green(path)),
+                "har_stop" => println!("{} HAR saved to {}", color::success_indicator(), color::green(path)),
+                "download" | "waitfordownload" => println!("{} Download saved to {}", color::success_indicator(), color::green(path)),
+                "video_stop" => println!("{} Video saved to {}", color::success_indicator(), color::green(path)),
+                "state_save" => println!("{} State saved to {}", color::success_indicator(), color::green(path)),
+                "state_load" => {
+                    if let Some(note) = data.get("note").and_then(|v| v.as_str()) {
+                        println!("{}", note);
+                    }
+                    println!("{} State path set to {}", color::success_indicator(), color::green(path));
+                }
+                // video_start and other commands that provide a path with a note
+                "video_start" => {
+                    if let Some(note) = data.get("note").and_then(|v| v.as_str()) {
+                        println!("{}", note);
+                    }
+                    println!("Path: {}", path);
+                }
+                _ => println!("{} Saved to {}", color::success_indicator(), color::green(path)),
+            }
+            return;
+        }
+
+        // Informational note
+        if let Some(note) = data.get("note").and_then(|v| v.as_str()) {
+            println!("{}", note);
             return;
         }
         // Default success
