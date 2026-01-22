@@ -335,11 +335,33 @@ pub fn parse_command(args: &[String], flags: &Flags) -> Result<Value, ParseError
 
         // === Screenshot/PDF ===
         "screenshot" => {
-            let mut cmd = json!({ "id": id, "action": "screenshot", "fullPage": flags.full });
-            if let Some(path) = rest.get(0) {
-                cmd["path"] = json!(path);
-            }
-            Ok(cmd)
+            // screenshot [selector] [path]
+            // selector: @ref or CSS selector
+            // path: file path (contains / or . or ends with known extension)
+            let (selector, path) = match (rest.get(0), rest.get(1)) {
+                (Some(first), Some(second)) => {
+                    // Two args: first is selector, second is path
+                    (Some(*first), Some(*second))
+                }
+                (Some(first), None) => {
+                    // One arg: determine if it's a selector or a path
+                    let is_relative_path = first.starts_with("./") || first.starts_with("../");
+                    let is_selector = !is_relative_path
+                        && (first.starts_with('.') || first.starts_with('#') || first.starts_with('@'));
+                    let has_path_extension = first.ends_with(".png")
+                        || first.ends_with(".jpg")
+                        || first.ends_with(".jpeg")
+                        || first.ends_with(".webp");
+                    let is_path = is_relative_path || first.contains('/') || has_path_extension;
+                    if is_selector || !is_path {
+                        (Some(*first), None)
+                    } else {
+                        (None, Some(*first))
+                    }
+                }
+                _ => (None, None),
+            };
+            Ok(json!({ "id": id, "action": "screenshot", "path": path, "selector": selector, "fullPage": flags.full }))
         }
         "pdf" => {
             let path = rest.get(0).ok_or_else(|| ParseError::MissingArguments {
@@ -1504,7 +1526,8 @@ mod tests {
     fn test_screenshot() {
         let cmd = parse_command(&args("screenshot"), &default_flags()).unwrap();
         assert_eq!(cmd["action"], "screenshot");
-        assert!(cmd.get("path").is_none());
+        assert_eq!(cmd["path"], serde_json::Value::Null);
+        assert_eq!(cmd["selector"], serde_json::Value::Null);
     }
 
     #[test]
@@ -1521,6 +1544,46 @@ mod tests {
         let cmd = parse_command(&args("screenshot"), &flags).unwrap();
         assert_eq!(cmd["action"], "screenshot");
         assert_eq!(cmd["fullPage"], true);
+    }
+
+    #[test]
+    fn test_screenshot_with_ref() {
+        let cmd = parse_command(&args("screenshot @e1"), &default_flags()).unwrap();
+        assert_eq!(cmd["action"], "screenshot");
+        assert_eq!(cmd["selector"], "@e1");
+        assert_eq!(cmd["path"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn test_screenshot_with_css_class() {
+        let cmd = parse_command(&args("screenshot .my-button"), &default_flags()).unwrap();
+        assert_eq!(cmd["action"], "screenshot");
+        assert_eq!(cmd["selector"], ".my-button");
+        assert_eq!(cmd["path"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn test_screenshot_with_css_id() {
+        let cmd = parse_command(&args("screenshot #header"), &default_flags()).unwrap();
+        assert_eq!(cmd["action"], "screenshot");
+        assert_eq!(cmd["selector"], "#header");
+        assert_eq!(cmd["path"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn test_screenshot_with_path() {
+        let cmd = parse_command(&args("screenshot ./output.png"), &default_flags()).unwrap();
+        assert_eq!(cmd["action"], "screenshot");
+        assert_eq!(cmd["selector"], serde_json::Value::Null);
+        assert_eq!(cmd["path"], "./output.png");
+    }
+
+    #[test]
+    fn test_screenshot_with_selector_and_path() {
+        let cmd = parse_command(&args("screenshot .btn ./button.png"), &default_flags()).unwrap();
+        assert_eq!(cmd["action"], "screenshot");
+        assert_eq!(cmd["selector"], ".btn");
+        assert_eq!(cmd["path"], "./button.png");
     }
 
     // === Snapshot ===
