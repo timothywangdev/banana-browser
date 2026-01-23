@@ -6,6 +6,18 @@ export default function Changelog() {
       <div className="prose">
         <h1>Changelog</h1>
 
+        <h2 id="v0.7.1">v0.7.1</h2>
+        <p className="text-[#888] text-sm">January 2026</p>
+
+        <h3>Bug Fixes</h3>
+        <ul>
+          <li>
+            <strong>Fix native binary distribution</strong> - Native binaries for all platforms (Linux x64/arm64, macOS x64/arm64, Windows x64) are now included in the npm package. Previously, the release workflow published to npm before building binaries, causing &quot;No binary found&quot; errors on installation.
+          </li>
+        </ul>
+
+        <hr className="my-8 border-[#333]" />
+
         <h2 id="v0.7.0">v0.7.0</h2>
         <p className="text-[#888] text-sm">January 2026</p>
 
