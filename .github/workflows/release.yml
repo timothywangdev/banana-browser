@@ -193,14 +193,13 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          path: bin/
+          path: artifacts/
 
       - name: Move binaries to bin directory
         run: |
-          for dir in bin/*/; do
-            mv "$dir"* bin/
-            rmdir "$dir"
-          done
+          mkdir -p bin
+          find artifacts -type f -name 'agent-browser-*' -exec mv {} bin/ \;
+          rm -rf artifacts
           chmod +x bin/agent-browser-* 2>/dev/null || true
           ls -la bin/
 
