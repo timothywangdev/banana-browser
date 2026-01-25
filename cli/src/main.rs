@@ -200,6 +200,7 @@ fn main() {
         flags.user_agent.as_deref(),
         flags.proxy.as_deref(),
         flags.proxy_bypass.as_deref(),
+        flags.ignore_https_errors,
     ) {
         Ok(result) => result,
         Err(e) => {
@@ -223,6 +224,7 @@ fn main() {
             flags.user_agent.as_ref().map(|_| "--user-agent"),
             flags.proxy.as_ref().map(|_| "--proxy"),
             flags.proxy_bypass.as_ref().map(|_| "--proxy-bypass"),
+            flags.ignore_https_errors.then(|| "--ignore-https-errors"),
         ]
         .into_iter()
         .flatten()
@@ -234,6 +236,10 @@ fn main() {
                 color::warning_indicator(),
                 ignored_flags.join(", ")
             );
+        }
+
+        if flags.ignore_https_errors {
+            eprintln!("{} --ignore-https-errors ignored: daemon already running. Use 'agent-browser close' first to restart with this option.", color::warning_indicator());
         }
     }
 
@@ -261,7 +267,7 @@ fn main() {
     // Connect via CDP if --cdp flag is set
     // Accepts either a port number (e.g., "9222") or a full URL (e.g., "ws://..." or "wss://...")
     if let Some(ref cdp_value) = flags.cdp {
-        let launch_cmd = if cdp_value.starts_with("ws://")
+        let mut launch_cmd = if cdp_value.starts_with("ws://")
             || cdp_value.starts_with("wss://")
             || cdp_value.starts_with("http://")
             || cdp_value.starts_with("https://")
@@ -316,6 +322,10 @@ fn main() {
                 "cdpPort": cdp_port
             })
         };
+
+        if flags.ignore_https_errors {
+            launch_cmd["ignoreHTTPSErrors"] = json!(true);
+        }
 
         let err = match send_command(launch_cmd, &flags.session) {
             Ok(resp) if resp.success => None,
@@ -399,6 +409,10 @@ fn main() {
                 .filter(|s| !s.is_empty())
                 .collect();
             cmd_obj.insert("args".to_string(), json!(args_vec));
+        }
+
+        if flags.ignore_https_errors {
+            launch_cmd["ignoreHTTPSErrors"] = json!(true);
         }
 
         if let Err(e) = send_command(launch_cmd, &flags.session) {
