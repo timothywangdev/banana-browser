@@ -17,7 +17,9 @@ case "$ARCH" in x86_64|amd64) ARCH="x64" ;; aarch64|arm64) ARCH="arm64" ;; esac
 
 BINARY="$SCRIPT_DIR/agent-browser-${OS}-${ARCH}"
 
-if [ -f "$BINARY" ] && [ -x "$BINARY" ]; then
+if [ -f "$BINARY" ]; then
+  # Ensure binary is executable (npm tarballs don't preserve execute bit)
+  [ -x "$BINARY" ] || chmod +x "$BINARY" 2>/dev/null
   exec "$BINARY" "$@"
 fi
 
