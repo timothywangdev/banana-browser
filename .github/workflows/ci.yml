@@ -138,6 +138,11 @@ jobs:
         run: |
           Copy-Item cli/target/x86_64-pc-windows-msvc/release/agent-browser.exe bin/agent-browser-win32-x64.exe
 
+      - name: Test CMD wrapper works
+        run: |
+          bin\agent-browser.cmd --version
+        shell: cmd
+
       - name: Test agent-browser install command
         run: |
           $env:PATH = "$pwd\bin;$env:PATH"
