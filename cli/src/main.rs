@@ -443,13 +443,33 @@ fn main() {
             launch_cmd["ignoreHTTPSErrors"] = json!(true);
         }
 
-        if let Err(e) = send_command(launch_cmd, &flags.session) {
-            if !flags.json {
-                eprintln!(
-                    "{} Could not configure browser: {}",
-                    color::warning_indicator(),
-                    e
-                );
+        match send_command(launch_cmd, &flags.session) {
+            Ok(resp) if !resp.success => {
+                // Launch command failed (e.g., invalid state file, profile error)
+                let error_msg = resp
+                    .error
+                    .unwrap_or_else(|| "Browser launch failed".to_string());
+                if flags.json {
+                    println!(r#"{{"success":false,"error":"{}"}}"#, error_msg);
+                } else {
+                    eprintln!("{} {}", color::error_indicator(), error_msg);
+                }
+                exit(1);
+            }
+            Err(e) => {
+                if flags.json {
+                    println!(r#"{{"success":false,"error":"{}"}}"#, e);
+                } else {
+                    eprintln!(
+                        "{} Could not configure browser: {}",
+                        color::error_indicator(),
+                        e
+                    );
+                }
+                exit(1);
+            }
+            Ok(_) => {
+                // Launch succeeded
             }
         }
     }

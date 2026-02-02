@@ -1107,8 +1107,12 @@ export class BrowserManager {
       context = await launcher.launchPersistentContext(profilePath, {
         headless: options.headless ?? true,
         executablePath: options.executablePath,
+        args: options.args,
         viewport,
         extraHTTPHeaders: options.headers,
+        userAgent: options.userAgent,
+        ...(options.proxy && { proxy: options.proxy }),
+        ignoreHTTPSErrors: options.ignoreHTTPSErrors ?? false,
       });
       this.isPersistentContext = true;
     } else {
