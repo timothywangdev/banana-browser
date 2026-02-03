@@ -18,6 +18,7 @@ pub struct Flags {
     pub user_agent: Option<String>,
     pub provider: Option<String>,
     pub ignore_https_errors: bool,
+    pub device: Option<String>,
 }
 
 pub fn parse_flags(args: &[String]) -> Flags {
@@ -49,6 +50,7 @@ pub fn parse_flags(args: &[String]) -> Flags {
         user_agent: env::var("AGENT_BROWSER_USER_AGENT").ok(),
         provider: env::var("AGENT_BROWSER_PROVIDER").ok(),
         ignore_https_errors: false,
+        device: env::var("AGENT_BROWSER_IOS_DEVICE").ok(),
     };
 
     let mut i = 0;
@@ -131,6 +133,12 @@ pub fn parse_flags(args: &[String]) -> Flags {
                 }
             }
             "--ignore-https-errors" => flags.ignore_https_errors = true,
+            "--device" => {
+                if let Some(d) = args.get(i + 1) {
+                    flags.device = Some(d.clone());
+                    i += 1;
+                }
+            }
             _ => {}
         }
         i += 1;
@@ -165,6 +173,7 @@ pub fn clean_args(args: &[String]) -> Vec<String> {
         "--user-agent",
         "-p",
         "--provider",
+        "--device",
     ];
 
     for arg in args.iter() {

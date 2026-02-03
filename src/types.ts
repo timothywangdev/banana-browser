@@ -521,6 +521,17 @@ export interface InputTouchCommand extends BaseCommand {
   modifiers?: number;
 }
 
+// iOS-specific commands
+export interface SwipeCommand extends BaseCommand {
+  action: 'swipe';
+  direction: 'up' | 'down' | 'left' | 'right';
+  distance?: number;
+}
+
+export interface DeviceListCommand extends BaseCommand {
+  action: 'device_list';
+}
+
 // Video recording (Playwright native - requires launch-time setup)
 export interface VideoStartCommand extends BaseCommand {
   action: 'video_start';
@@ -931,7 +942,9 @@ export type Command =
   | ScreencastStopCommand
   | InputMouseCommand
   | InputKeyboardCommand
-  | InputTouchCommand;
+  | InputTouchCommand
+  | SwipeCommand
+  | DeviceListCommand;
 
 // Response types
 export interface SuccessResponse<T = unknown> {

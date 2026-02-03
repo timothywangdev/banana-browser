@@ -14,6 +14,7 @@ const navigation = [
   { name: "Snapshots", href: "/snapshots" },
   { name: "Streaming", href: "/streaming" },
   { name: "CDP Mode", href: "/cdp-mode" },
+  { name: "iOS Simulator", href: "/ios" },
   { name: "Changelog", href: "/changelog" },
 ];
 

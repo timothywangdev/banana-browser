@@ -207,6 +207,8 @@ fn main() {
         flags.ignore_https_errors,
         flags.profile.as_deref(),
         flags.state.as_deref(),
+        flags.provider.as_deref(),
+        flags.device.as_deref(),
     ) {
         Ok(result) => result,
         Err(e) => {

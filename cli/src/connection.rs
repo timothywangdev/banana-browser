@@ -215,6 +215,8 @@ pub fn ensure_daemon(
     ignore_https_errors: bool,
     profile: Option<&str>,
     state: Option<&str>,
+    provider: Option<&str>,
+    device: Option<&str>,
 ) -> Result<DaemonResult, String> {
     // Check if daemon is running AND responsive
     if is_daemon_running(session) && daemon_ready(session) {
@@ -343,6 +345,14 @@ pub fn ensure_daemon(
             cmd.env("AGENT_BROWSER_STATE", st);
         }
 
+        if let Some(p) = provider {
+            cmd.env("AGENT_BROWSER_PROVIDER", p);
+        }
+
+        if let Some(d) = device {
+            cmd.env("AGENT_BROWSER_IOS_DEVICE", d);
+        }
+
         // Create new process group and session to fully detach
         unsafe {
             cmd.pre_exec(|| {
@@ -408,6 +418,14 @@ pub fn ensure_daemon(
 
         if let Some(st) = state {
             cmd.env("AGENT_BROWSER_STATE", st);
+        }
+
+        if let Some(p) = provider {
+            cmd.env("AGENT_BROWSER_PROVIDER", p);
+        }
+
+        if let Some(d) = device {
+            cmd.env("AGENT_BROWSER_IOS_DEVICE", d);
         }
 
         // CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS

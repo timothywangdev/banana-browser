@@ -691,6 +691,98 @@ Core workflow:
 
 ## Integrations
 
+### iOS Simulator
+
+Control real Mobile Safari in the iOS Simulator for authentic mobile web testing. Requires macOS with Xcode.
+
+**Setup:**
+
+```bash
+# Install Appium and XCUITest driver
+npm install -g appium
+appium driver install xcuitest
+```
+
+**Usage:**
+
+```bash
+# List available iOS simulators
+agent-browser device list
+
+# Launch Safari on a specific device
+agent-browser -p ios --device "iPhone 16 Pro" open https://example.com
+
+# Same commands as desktop
+agent-browser -p ios snapshot -i
+agent-browser -p ios tap @e1
+agent-browser -p ios fill @e2 "text"
+agent-browser -p ios screenshot mobile.png
+
+# Mobile-specific commands
+agent-browser -p ios swipe up
+agent-browser -p ios swipe down 500
+
+# Close session
+agent-browser -p ios close
+```
+
+Or use environment variables:
+
+```bash
+export AGENT_BROWSER_PROVIDER=ios
+export AGENT_BROWSER_IOS_DEVICE="iPhone 16 Pro"
+agent-browser open https://example.com
+```
+
+| Variable | Description |
+|----------|-------------|
+| `AGENT_BROWSER_PROVIDER` | Set to `ios` to enable iOS mode |
+| `AGENT_BROWSER_IOS_DEVICE` | Device name (e.g., "iPhone 16 Pro", "iPad Pro") |
+| `AGENT_BROWSER_IOS_UDID` | Device UDID (alternative to device name) |
+
+**Supported devices:** All iOS Simulators available in Xcode (iPhones, iPads), plus real iOS devices.
+
+**Note:** The iOS provider boots the simulator, starts Appium, and controls Safari. First launch takes ~30-60 seconds; subsequent commands are fast.
+
+#### Real Device Support
+
+Appium also supports real iOS devices connected via USB. This requires additional one-time setup:
+
+**1. Get your device UDID:**
+```bash
+xcrun xctrace list devices
+# or
+system_profiler SPUSBDataType | grep -A 5 "iPhone\|iPad"
+```
+
+**2. Sign WebDriverAgent (one-time):**
+```bash
+# Open the WebDriverAgent Xcode project
+cd ~/.appium/node_modules/appium-xcuitest-driver/node_modules/appium-webdriveragent
+open WebDriverAgent.xcodeproj
+```
+
+In Xcode:
+- Select the `WebDriverAgentRunner` target
+- Go to Signing & Capabilities
+- Select your Team (requires Apple Developer account, free tier works)
+- Let Xcode manage signing automatically
+
+**3. Use with agent-browser:**
+```bash
+# Connect device via USB, then:
+agent-browser -p ios --device "<DEVICE_UDID>" open https://example.com
+
+# Or use the device name if unique
+agent-browser -p ios --device "John's iPhone" open https://example.com
+```
+
+**Real device notes:**
+- First run installs WebDriverAgent to the device (may require Trust prompt)
+- Device must be unlocked and connected via USB
+- Slightly slower initial connection than simulator
+- Tests against real Safari performance and behavior
+
 ### Browserbase
 
 [Browserbase](https://browserbase.com) provides remote browser infrastructure to make deployment of agentic browsing agents easy. Use it when running the agent-browser CLI in an environment where a local browser isn't feasible.
