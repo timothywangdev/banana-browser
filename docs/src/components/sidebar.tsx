@@ -13,7 +13,6 @@ const navigation = [
   { name: "Sessions", href: "/sessions" },
   { name: "Snapshots", href: "/snapshots" },
   { name: "Streaming", href: "/streaming" },
-  { name: "Agent Mode", href: "/agent-mode" },
   { name: "CDP Mode", href: "/cdp-mode" },
   { name: "Changelog", href: "/changelog" },
 ];
