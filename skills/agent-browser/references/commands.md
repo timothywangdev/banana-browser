@@ -189,14 +189,21 @@ agent-browser dialog dismiss        # Dismiss dialog
 
 ```bash
 agent-browser eval "document.title"          # Simple expressions only
-agent-browser eval -b "<base64>"             # Any JavaScript (recommended)
+agent-browser eval -b "<base64>"             # Any JavaScript (base64 encoded)
+agent-browser eval --stdin                   # Read script from stdin
 ```
 
-Use `-b`/`--base64` for reliable execution. Shell escaping with nested quotes and special characters is error-prone.
+Use `-b`/`--base64` or `--stdin` for reliable execution. Shell escaping with nested quotes and special characters is error-prone.
 
 ```bash
 # Base64 encode your script, then:
 agent-browser eval -b "ZG9jdW1lbnQucXVlcnlTZWxlY3RvcignW3NyYyo9Il9uZXh0Il0nKQ=="
+
+# Or use stdin with heredoc for multiline scripts:
+cat <<'EOF' | agent-browser eval --stdin
+const links = document.querySelectorAll('a');
+Array.from(links).map(a => a.href);
+EOF
 ```
 
 ## State Management

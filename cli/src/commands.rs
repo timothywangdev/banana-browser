@@ -1,5 +1,6 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde_json::{json, Value};
+use std::io::{self, BufRead};
 
 use crate::flags::Flags;
 
@@ -419,24 +420,37 @@ pub fn parse_command(args: &[String], flags: &Flags) -> Result<Value, ParseError
 
         // === Eval ===
         "eval" => {
-            let (is_base64, script_parts): (bool, &[&str]) =
+            // Check for flags: -b/--base64 or --stdin
+            let (is_base64, is_stdin, script_parts): (bool, bool, &[&str]) =
                 if rest.first() == Some(&"-b") || rest.first() == Some(&"--base64") {
-                    (true, &rest[1..])
+                    (true, false, &rest[1..])
+                } else if rest.first() == Some(&"--stdin") {
+                    (false, true, &rest[1..])
                 } else {
-                    (false, rest.as_slice())
+                    (false, false, rest.as_slice())
                 };
-            let raw_script = script_parts.join(" ");
-            let script = if is_base64 {
-                let decoded = STANDARD.decode(&raw_script).map_err(|_| ParseError::InvalidValue {
-                    message: "Invalid base64 encoding".to_string(),
-                    usage: "eval -b <base64-encoded-script>",
-                })?;
-                String::from_utf8(decoded).map_err(|_| ParseError::InvalidValue {
-                    message: "Base64 decoded to invalid UTF-8".to_string(),
-                    usage: "eval -b <base64-encoded-script>",
-                })?
+
+            let script = if is_stdin {
+                // Read script from stdin
+                let stdin = io::stdin();
+                let lines: Vec<String> = stdin.lock().lines()
+                    .map(|l| l.unwrap_or_default())
+                    .collect();
+                lines.join("\n")
             } else {
-                raw_script
+                let raw_script = script_parts.join(" ");
+                if is_base64 {
+                    let decoded = STANDARD.decode(&raw_script).map_err(|_| ParseError::InvalidValue {
+                        message: "Invalid base64 encoding".to_string(),
+                        usage: "eval -b <base64-encoded-script>",
+                    })?;
+                    String::from_utf8(decoded).map_err(|_| ParseError::InvalidValue {
+                        message: "Base64 decoded to invalid UTF-8".to_string(),
+                        usage: "eval -b <base64-encoded-script>",
+                    })?
+                } else {
+                    raw_script
+                }
             };
             Ok(json!({ "id": id, "action": "evaluate", "script": script }))
         }
