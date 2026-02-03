@@ -879,9 +879,12 @@ Examples:
             r##"
 agent-browser eval - Execute JavaScript
 
-Usage: agent-browser eval <script>
+Usage: agent-browser eval [options] <script>
 
 Executes JavaScript code in the browser context and returns the result.
+
+Options:
+  -b, --base64         Decode script from base64 (avoids shell escaping issues)
 
 Global Options:
   --json               Output as JSON
@@ -891,6 +894,7 @@ Examples:
   agent-browser eval "document.title"
   agent-browser eval "window.location.href"
   agent-browser eval "document.querySelectorAll('a').length"
+  agent-browser eval -b "ZG9jdW1lbnQudGl0bGU="
 "##
         }
 

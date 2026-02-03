@@ -214,7 +214,15 @@ agent-browser dialog dismiss        # Dismiss dialog
 ### JavaScript
 
 ```bash
-agent-browser eval "document.title"   # Run JavaScript
+agent-browser eval "document.title"          # Simple expressions only
+agent-browser eval -b "<base64>"             # Any JavaScript (recommended)
+```
+
+Use `-b`/`--base64` for reliable execution. Shell escaping with nested quotes and special characters is error-prone.
+
+```bash
+# Base64 encode your script, then:
+agent-browser eval -b "ZG9jdW1lbnQucXVlcnlTZWxlY3RvcignW3NyYyo9Il9uZXh0Il0nKQ=="
 ```
 
 ## Global options

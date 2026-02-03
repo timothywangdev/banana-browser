@@ -1,3 +1,4 @@
+use base64::{engine::general_purpose::STANDARD, Engine};
 use serde_json::{json, Value};
 
 use crate::flags::Flags;
@@ -417,7 +418,28 @@ pub fn parse_command(args: &[String], flags: &Flags) -> Result<Value, ParseError
         }
 
         // === Eval ===
-        "eval" => Ok(json!({ "id": id, "action": "evaluate", "script": rest.join(" ") })),
+        "eval" => {
+            let (is_base64, script_parts): (bool, &[&str]) =
+                if rest.first() == Some(&"-b") || rest.first() == Some(&"--base64") {
+                    (true, &rest[1..])
+                } else {
+                    (false, rest.as_slice())
+                };
+            let raw_script = script_parts.join(" ");
+            let script = if is_base64 {
+                let decoded = STANDARD.decode(&raw_script).map_err(|_| ParseError::InvalidValue {
+                    message: "Invalid base64 encoding".to_string(),
+                    usage: "eval -b <base64-encoded-script>",
+                })?;
+                String::from_utf8(decoded).map_err(|_| ParseError::InvalidValue {
+                    message: "Base64 decoded to invalid UTF-8".to_string(),
+                    usage: "eval -b <base64-encoded-script>",
+                })?
+            } else {
+                raw_script
+            };
+            Ok(json!({ "id": id, "action": "evaluate", "script": script }))
+        }
 
         // === Close ===
         "close" | "quit" | "exit" => Ok(json!({ "id": id, "action": "close" })),
@@ -2023,6 +2045,53 @@ mod tests {
             result.unwrap_err(),
             ParseError::MissingArguments { .. }
         ));
+    }
+
+    // === Eval Tests ===
+
+    #[test]
+    fn test_eval_basic() {
+        let cmd = parse_command(&args("eval document.title"), &default_flags()).unwrap();
+        assert_eq!(cmd["action"], "evaluate");
+        assert_eq!(cmd["script"], "document.title");
+    }
+
+    #[test]
+    fn test_eval_base64_short_flag() {
+        // "document.title" in base64
+        let cmd = parse_command(&args("eval -b ZG9jdW1lbnQudGl0bGU="), &default_flags()).unwrap();
+        assert_eq!(cmd["action"], "evaluate");
+        assert_eq!(cmd["script"], "document.title");
+    }
+
+    #[test]
+    fn test_eval_base64_long_flag() {
+        // "document.title" in base64
+        let cmd =
+            parse_command(&args("eval --base64 ZG9jdW1lbnQudGl0bGU="), &default_flags()).unwrap();
+        assert_eq!(cmd["action"], "evaluate");
+        assert_eq!(cmd["script"], "document.title");
+    }
+
+    #[test]
+    fn test_eval_base64_with_special_chars() {
+        // "document.querySelector('[src*=\"_next\"]')" in base64
+        let cmd = parse_command(
+            &args("eval -b ZG9jdW1lbnQucXVlcnlTZWxlY3RvcignW3NyYyo9Il9uZXh0Il0nKQ=="),
+            &default_flags(),
+        )
+        .unwrap();
+        assert_eq!(cmd["action"], "evaluate");
+        assert_eq!(cmd["script"], "document.querySelector('[src*=\"_next\"]')");
+    }
+
+    #[test]
+    fn test_eval_base64_invalid() {
+        let result = parse_command(&args("eval -b !!!invalid!!!"), &default_flags());
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, ParseError::InvalidValue { .. }));
+        assert!(err.format().contains("Invalid base64"));
     }
 
     #[test]
