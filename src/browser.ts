@@ -115,6 +115,7 @@ export class BrowserManager {
    */
   async getSnapshot(options?: {
     interactive?: boolean;
+    cursor?: boolean;
     maxDepth?: number;
     compact?: boolean;
     selector?: string;
@@ -145,6 +146,13 @@ export class BrowserManager {
     if (!refData) return null;
 
     const page = this.getPage();
+
+    // Check if this is a cursor-interactive element (uses CSS selector, not ARIA role)
+    // These have pseudo-roles 'clickable' or 'focusable' and a CSS selector
+    if (refData.role === 'clickable' || refData.role === 'focusable') {
+      // The selector is a CSS selector, use it directly
+      return page.locator(refData.selector);
+    }
 
     // Build locator with exact: true to avoid substring matches
     let locator: Locator;
