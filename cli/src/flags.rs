@@ -18,6 +18,7 @@ pub struct Flags {
     pub user_agent: Option<String>,
     pub provider: Option<String>,
     pub ignore_https_errors: bool,
+    pub allow_file_access: bool,
     pub device: Option<String>,
 
     // Track which launch-time options were explicitly passed via CLI
@@ -30,6 +31,7 @@ pub struct Flags {
     pub cli_user_agent: bool,
     pub cli_proxy: bool,
     pub cli_proxy_bypass: bool,
+    pub cli_allow_file_access: bool,
 }
 
 pub fn parse_flags(args: &[String]) -> Flags {
@@ -61,6 +63,7 @@ pub fn parse_flags(args: &[String]) -> Flags {
         user_agent: env::var("AGENT_BROWSER_USER_AGENT").ok(),
         provider: env::var("AGENT_BROWSER_PROVIDER").ok(),
         ignore_https_errors: false,
+        allow_file_access: env::var("AGENT_BROWSER_ALLOW_FILE_ACCESS").is_ok(),
         device: env::var("AGENT_BROWSER_IOS_DEVICE").ok(),
         // Track CLI-passed flags (default false, set to true when flag is passed)
         cli_executable_path: false,
@@ -71,6 +74,7 @@ pub fn parse_flags(args: &[String]) -> Flags {
         cli_user_agent: false,
         cli_proxy: false,
         cli_proxy_bypass: false,
+        cli_allow_file_access: false,
     };
 
     let mut i = 0;
@@ -161,6 +165,10 @@ pub fn parse_flags(args: &[String]) -> Flags {
                 }
             }
             "--ignore-https-errors" => flags.ignore_https_errors = true,
+            "--allow-file-access" => {
+                flags.allow_file_access = true;
+                flags.cli_allow_file_access = true;
+            }
             "--device" => {
                 if let Some(d) = args.get(i + 1) {
                     flags.device = Some(d.clone());
@@ -185,6 +193,7 @@ pub fn clean_args(args: &[String]) -> Vec<String> {
         "--headed",
         "--debug",
         "--ignore-https-errors",
+        "--allow-file-access",
     ];
     // Global flags that take a value (need to skip the next arg too)
     const GLOBAL_FLAGS_WITH_VALUE: &[&str] = &[

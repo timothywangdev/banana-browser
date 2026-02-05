@@ -1427,6 +1427,7 @@ mod tests {
             user_agent: None,
             provider: None,
             ignore_https_errors: false,
+            allow_file_access: false,
             device: None,
             cli_executable_path: false,
             cli_extensions: false,
@@ -1436,6 +1437,7 @@ mod tests {
             cli_user_agent: false,
             cli_proxy: false,
             cli_proxy_bypass: false,
+            cli_allow_file_access: false,
         }
     }
 
