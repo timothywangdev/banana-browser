@@ -1278,7 +1278,7 @@ export class BrowserManager {
 
   /**
    * Set up tracking for new pages in a context (for CDP connections and popups/new tabs)
-   * This handles pages created externally (e.g., via target="_blank" links)
+   * This handles pages created externally (e.g., via target="_blank" links, window.open)
    */
   private setupContextTracking(context: BrowserContext): void {
     context.on('page', (page) => {
@@ -1286,6 +1286,17 @@ export class BrowserManager {
       if (!this.pages.includes(page)) {
         this.pages.push(page);
         this.setupPageTracking(page);
+      }
+
+      // Auto-switch to the newly opened tab so subsequent commands target it.
+      // For tabs created via newTab()/newWindow(), this is redundant (they set activePageIndex after),
+      // but for externally opened tabs (window.open, target="_blank"), this ensures the active tab
+      // stays in sync with the browser.
+      const newIndex = this.pages.indexOf(page);
+      if (newIndex !== -1 && newIndex !== this.activePageIndex) {
+        this.activePageIndex = newIndex;
+        // Invalidate CDP session since the active page changed
+        this.invalidateCDPSession().catch(() => {});
       }
     });
   }

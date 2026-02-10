@@ -132,6 +132,33 @@ describe('BrowserManager', () => {
         expect(result.remaining).toBe(1);
       }
     });
+
+    it('should auto-switch to externally opened tab (window.open)', async () => {
+      // Ensure we start on tab 0
+      const initialIndex = browser.getActiveIndex();
+      expect(initialIndex).toBe(0);
+
+      const page = browser.getPage();
+
+      // Use window.open to create a new tab externally (as a user/script would)
+      await page.evaluate(() => {
+        window.open('about:blank', '_blank');
+      });
+
+      // Wait for the new page event to be processed
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      // Active tab should now be the newly opened tab
+      const newIndex = browser.getActiveIndex();
+      expect(newIndex).toBe(1);
+
+      const tabs = await browser.listTabs();
+      expect(tabs.length).toBe(2);
+      expect(tabs[1].active).toBe(true);
+
+      // Clean up: close the new tab
+      await browser.closeTab(1);
+    });
   });
 
   describe('context operations', () => {
