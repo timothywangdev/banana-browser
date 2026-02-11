@@ -1,13 +1,28 @@
 "use client";
 
-import { useRef, useEffect, useState } from "react";
+import {
+  useRef,
+  useEffect,
+  useState,
+  useCallback,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { Streamdown } from "streamdown";
 import Link from "next/link";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 
 const STORAGE_KEY = "docs-chat-messages";
 const transport = new DefaultChatTransport({ api: "/api/docs-chat" });
+
+const DESKTOP_DEFAULT_WIDTH = 400;
+const DESKTOP_MIN_WIDTH = 300;
+const DESKTOP_MAX_WIDTH = 700;
+
+function setCookie(name: string, value: string) {
+  document.cookie = `${name}=${encodeURIComponent(value)};path=/;max-age=${60 * 60 * 24 * 365};samesite=lax`;
+}
 
 const TOOL_LABELS: Record<
   string,
@@ -84,12 +99,12 @@ function ToolCallDisplay({
   return (
     <div className="text-xs py-0.5 min-w-0">
       {isRunning ? (
-        <span className="inline-flex items-center gap-1 font-mono text-muted-foreground animate-tool-shimmer min-w-0">
+        <span className="inline-flex items-center gap-1 font-mono text-muted-foreground animate-tool-shimmer min-w-0 max-w-full">
           <span className="shrink-0">{displayLabel}</span>
           {argEl}
         </span>
       ) : (
-        <span className="inline-flex items-center gap-1 font-mono text-muted-foreground/60 min-w-0">
+        <span className="inline-flex items-center gap-1 font-mono text-muted-foreground/60 min-w-0 max-w-full">
           <span className="shrink-0">{displayLabel}</span>
           {argEl}
           {isError && <span className="text-destructive">failed</span>}
@@ -107,20 +122,109 @@ const SUGGESTIONS = [
   "How do I use CDP mode?",
 ];
 
-export function DocsChat() {
-  const [open, setOpen] = useState(false);
+export function DocsChat({
+  defaultOpen = false,
+  defaultWidth = DESKTOP_DEFAULT_WIDTH,
+}: {
+  defaultOpen?: boolean;
+  defaultWidth?: number;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
   const [input, setInput] = useState("");
-  const [focused, setFocused] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [isDesktop, setIsDesktop] = useState(false);
+  const [hasMounted, setHasMounted] = useState(false);
+  const [desktopWidth, setDesktopWidth] = useState(
+    Math.min(DESKTOP_MAX_WIDTH, Math.max(DESKTOP_MIN_WIDTH, defaultWidth)),
+  );
+  const messagesScrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
   const restoredRef = useRef(false);
+  const isDraggingRef = useRef(false);
 
   const { messages, sendMessage, status, setMessages, error } = useChat({
     transport,
   });
 
   const isLoading = status === "streaming" || status === "submitted";
+  const showMessages = messages.length > 0 || !!error || isLoading;
+
+  // Detect desktop vs mobile. Close sidebar on mobile if it was open from cookie.
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 640px)");
+    setIsDesktop(mq.matches);
+    setHasMounted(true);
+    // If on mobile but sidebar was open from cookie, close it
+    if (!mq.matches && defaultOpen) {
+      setOpen(false);
+    }
+    const handler = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persist open state to cookie (only after mount to avoid overwriting on mobile)
+  useEffect(() => {
+    if (hasMounted) {
+      setCookie("docs-chat-open", String(open));
+    }
+  }, [open, hasMounted]);
+
+  // Push page content on desktop when pane is open.
+  // Use padding on body so the page scrollbar stays at the viewport edge (behind the sidebar)
+  // instead of appearing right next to the sidebar's scrollbar.
+  useEffect(() => {
+    const body = document.body;
+    if (isDesktop && open) {
+      body.style.paddingRight = `${desktopWidth}px`;
+      if (!isDraggingRef.current) {
+        body.style.transition = "padding-right 150ms ease";
+      }
+    } else if (isDesktop) {
+      body.style.paddingRight = "0px";
+      body.style.transition = "padding-right 150ms ease";
+    }
+    return () => {
+      body.style.paddingRight = "0px";
+      body.style.transition = "";
+    };
+  }, [isDesktop, open, desktopWidth]);
+
+  // Resize handle drag
+  const handleResizePointerDown = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      isDraggingRef.current = true;
+      document.documentElement.style.transition = "none";
+      const startX = e.clientX;
+      const startWidth = desktopWidth;
+
+      const onPointerMove = (ev: globalThis.PointerEvent) => {
+        const delta = startX - ev.clientX;
+        const newWidth = Math.min(
+          DESKTOP_MAX_WIDTH,
+          Math.max(DESKTOP_MIN_WIDTH, startWidth + delta),
+        );
+        setDesktopWidth(newWidth);
+      };
+
+      const onPointerUp = () => {
+        isDraggingRef.current = false;
+        document.documentElement.style.transition = "";
+        document.removeEventListener("pointermove", onPointerMove);
+        document.removeEventListener("pointerup", onPointerUp);
+      };
+
+      document.addEventListener("pointermove", onPointerMove);
+      document.addEventListener("pointerup", onPointerUp);
+    },
+    [desktopWidth],
+  );
+
+  // Persist width to cookie
+  useEffect(() => {
+    setCookie("docs-chat-width", String(desktopWidth));
+  }, [desktopWidth]);
 
   // Restore messages from sessionStorage on mount
   useEffect(() => {
@@ -154,77 +258,62 @@ export function DocsChat() {
     }
   }, [messages, isLoading]);
 
-  // Auto-open when new messages arrive (but not on initial restore)
-  const prevMessageCount = useRef<number | null>(null);
-  const initializedRef = useRef(false);
-  useEffect(() => {
-    // Skip until after the first sessionStorage restore cycle
-    if (!initializedRef.current) {
-      // Wait one tick after mount to let restore settle
-      const id = requestAnimationFrame(() => {
-        prevMessageCount.current = messages.length;
-        initializedRef.current = true;
-      });
-      return () => cancelAnimationFrame(id);
-    }
-    if (
-      prevMessageCount.current !== null &&
-      messages.length > prevMessageCount.current
-    ) {
-      setOpen(true);
-    }
-    prevMessageCount.current = messages.length;
-  }, [messages.length]);
-
-  // Scroll to bottom when messages change or error occurs
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, error]);
-
-  // Cmd+K to focus prompt, Esc to close
+  // Cmd+K to open sidebar and focus prompt, Escape to close
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        inputRef.current?.focus();
+        setOpen((prev) => {
+          if (!prev) {
+            setTimeout(() => inputRef.current?.focus(), 200);
+          }
+          return !prev;
+        });
       }
-      if (e.key === "Escape" && open) {
+      if (e.key === "Escape" && open && isDesktop) {
         setOpen(false);
-        inputRef.current?.blur();
       }
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [open]);
+  }, [open, isDesktop]);
 
-  // Close message area when clicking outside
+  // Auto-focus input when opened
   useEffect(() => {
-    if (!open) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (
-        containerRef.current &&
-        !containerRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    if (open) {
+      const timer = setTimeout(() => inputRef.current?.focus(), 200);
+      return () => clearTimeout(timer);
+    }
   }, [open]);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || isLoading) return;
-    sendMessage({ text: input });
-    setInput("");
-  };
+  // Auto-open when error occurs
+  useEffect(() => {
+    if (error) setOpen(true);
+  }, [error]);
 
-  const handleClear = () => {
+  // Scroll to bottom when messages change or error occurs
+  useEffect(() => {
+    const el = messagesScrollRef.current;
+    if (!el) return;
+    requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight;
+    });
+  }, [messages, error]);
+
+  const handleSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!input.trim() || isLoading) return;
+      sendMessage({ text: input });
+      setInput("");
+    },
+    [input, isLoading, sendMessage],
+  );
+
+  const handleClear = useCallback(() => {
     setMessages([]);
     sessionStorage.removeItem(STORAGE_KEY);
-    setOpen(false);
-    inputRef.current?.focus();
-  };
+  }, [setMessages]);
 
   const hasVisibleContent = (
     parts: (typeof messages)[number]["parts"],
@@ -234,204 +323,216 @@ export function DocsChat() {
     );
   };
 
-  // Auto-open when error occurs
-  useEffect(() => {
-    if (error) setOpen(true);
-  }, [error]);
-
-  const showMessages = open && (messages.length > 0 || !!error);
-  const showSuggestions = focused && messages.length === 0 && !isLoading;
-
-  return (
-    <div className="fixed bottom-0 left-0 right-0 z-50 pointer-events-none">
-      <div
-        ref={containerRef}
-        className={`mx-auto px-4 pb-4 *:pointer-events-auto transition-all duration-300 ${focused || showMessages ? "max-w-xl" : "max-w-56"}`}
-      >
-        <div
-          className={`border rounded-lg overflow-hidden ${focused || showMessages ? "border-background" : "border-[var(--chat-bg)]"}`}
-          style={{ backgroundColor: "var(--chat-bg)" }}
-        >
-          {/* Suggestions panel */}
-          {showSuggestions && (
-            <div>
-              <div className="flex items-center px-4 py-2 border-b border-background shrink-0">
-                <span className="text-xs font-medium text-muted-foreground">
-                  agent-browser Docs
-                </span>
-              </div>
-              <div className="flex flex-wrap gap-2 p-3">
-                {SUGGESTIONS.map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      setOpen(true);
-                      sendMessage({ text: s });
-                    }}
-                    className="text-xs px-3 py-1.5 rounded-full border border-background bg-background font-medium text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          {/* Messages panel */}
+  // Shared chat panel content used by both desktop and mobile
+  const chatPanel = (
+    <>
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 border-b shrink-0">
+        <span className="text-sm font-medium">agent-browser Docs</span>
+        <div className="flex items-center gap-3">
           {showMessages && (
-            <div className="max-h-[60vh] flex flex-col">
-              <div className="flex items-center justify-between px-4 py-2 border-b border-background shrink-0">
-                <span className="text-xs font-medium text-muted-foreground">
-                  agent-browser Docs
-                </span>
-                <button
-                  onClick={handleClear}
-                  className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                  aria-label="Clear conversation"
-                >
-                  Clear
-                </button>
-              </div>
-              <div
-                className="p-4 space-y-4 overflow-y-auto"
-                onClick={(e) => {
-                  if ((e.target as HTMLElement).closest("a")) {
-                    setOpen(false);
-                  }
-                }}
-              >
-                {messages.map((message) => {
-                  if (!hasVisibleContent(message.parts)) return null;
-                  return (
-                    <div key={message.id}>
-                      {message.role === "user" ? (
-                        <div className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">
-                          {message.parts
-                            .filter(
-                              (p): p is Extract<typeof p, { type: "text" }> =>
-                                p.type === "text",
-                            )
-                            .map((p) => p.text)
-                            .join("")}
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          {message.parts.map((part, i) => {
-                            if (part.type === "text" && part.text) {
-                              return (
-                                <div
-                                  key={i}
-                                  className="docs-chat-content text-sm text-foreground/90 leading-relaxed prose prose-sm dark:prose-invert max-w-none"
-                                >
-                                  <Streamdown>{part.text}</Streamdown>
-                                </div>
-                              );
-                            }
-                            if (isToolPart(part)) {
-                              return (
-                                <ToolCallDisplay
-                                  key={part.toolCallId}
-                                  part={part}
-                                />
-                              );
-                            }
-                            return null;
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-                {error && (
-                  <div className="text-sm text-destructive/80 bg-destructive/10 rounded-md px-3 py-2">
-                    {(() => {
-                      try {
-                        const parsed = JSON.parse(error.message);
-                        return parsed.message || parsed.error || error.message;
-                      } catch {
-                        return (
-                          error.message ||
-                          "Something went wrong. Please try again."
-                        );
-                      }
-                    })()}
-                  </div>
-                )}
-                <div ref={messagesEndRef} />
-              </div>
-            </div>
-          )}
-
-          {/* Input bar */}
-          <form
-            onSubmit={handleSubmit}
-            onClick={() => inputRef.current?.focus()}
-            className={`relative flex items-end gap-2 px-3 py-2 cursor-text${showMessages ? " border-t border-background" : ""}`}
-          >
-            {!input && (
-              <div className="absolute inset-0 flex items-center px-3 pointer-events-none">
-                <span className="text-sm text-muted-foreground truncate flex-1">
-                  Ask a question...
-                </span>
-                {!focused && !showMessages && (
-                  <span className="text-muted-foreground/40 font-mono text-xs shrink-0">
-                    &#8984;K
-                  </span>
-                )}
-              </div>
-            )}
-            <textarea
-              ref={inputRef}
-              value={input}
-              onChange={(e) => {
-                setInput(e.target.value);
-                e.target.style.height = "auto";
-                e.target.style.height = `${e.target.scrollHeight}px`;
-              }}
-              rows={1}
-              onFocus={() => {
-                setFocused(true);
-                if (messages.length > 0) setOpen(true);
-              }}
-              onBlur={() => {
-                setFocused(false);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") {
-                  setOpen(false);
-                  inputRef.current?.blur();
-                }
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSubmit(e);
-                }
-              }}
-              className="flex-1 bg-transparent text-base sm:text-sm text-foreground outline-none disabled:opacity-50 resize-none max-h-32 leading-relaxed relative z-10"
-            />
             <button
-              type="submit"
-              disabled={isLoading || !input.trim()}
-              className={`bg-primary text-primary-foreground rounded-md p-1 hover:bg-primary/90 transition-colors disabled:opacity-30${!focused && !showMessages ? " hidden" : ""}`}
-              aria-label="Send message"
+              onClick={handleClear}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              aria-label="Clear conversation"
             >
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <line x1="12" y1="19" x2="12" y2="5" />
-                <polyline points="5 12 12 5 19 12" />
-              </svg>
+              Clear
             </button>
-          </form>
+          )}
+          <button
+            onClick={() => setOpen(false)}
+            className="text-muted-foreground hover:text-foreground transition-colors"
+            aria-label="Close panel"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
         </div>
       </div>
-    </div>
+
+      {/* Content: suggestions or messages */}
+      {showMessages ? (
+        <div
+          ref={messagesScrollRef}
+          className="flex-1 min-h-0 p-4 space-y-4 overflow-y-auto"
+        >
+          {messages.map((message) => {
+            if (!hasVisibleContent(message.parts)) return null;
+            return (
+              <div key={message.id}>
+                {message.role === "user" ? (
+                  <div className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">
+                    {message.parts
+                      .filter(
+                        (p): p is Extract<typeof p, { type: "text" }> =>
+                          p.type === "text",
+                      )
+                      .map((p) => p.text)
+                      .join("")}
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {message.parts.map((part, i) => {
+                      if (part.type === "text" && part.text) {
+                        return (
+                          <div
+                            key={i}
+                            className="docs-chat-content text-sm text-foreground leading-relaxed prose prose-sm dark:prose-invert max-w-none"
+                          >
+                            <Streamdown>{part.text}</Streamdown>
+                          </div>
+                        );
+                      }
+                      if (isToolPart(part)) {
+                        return (
+                          <ToolCallDisplay key={part.toolCallId} part={part} />
+                        );
+                      }
+                      return null;
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {error && (
+            <div className="text-sm text-destructive/80 bg-destructive/10 rounded-md px-3 py-2">
+              {(() => {
+                try {
+                  const parsed = JSON.parse(error.message);
+                  return parsed.message || parsed.error || error.message;
+                } catch {
+                  return (
+                    error.message || "Something went wrong. Please try again."
+                  );
+                }
+              })()}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="flex-1 min-h-0 flex flex-col">
+          <div className="flex flex-wrap gap-2 p-4">
+            {SUGGESTIONS.map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => {
+                  sendMessage({ text: s });
+                }}
+                className="text-xs px-3 py-1.5 rounded-full border bg-secondary font-medium text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Input bar */}
+      <form
+        onSubmit={handleSubmit}
+        className="flex items-end gap-2 px-4 py-3 border-t shrink-0"
+      >
+        <textarea
+          ref={inputRef}
+          value={input}
+          onChange={(e) => {
+            setInput(e.target.value);
+            e.target.style.height = "auto";
+            e.target.style.height = `${e.target.scrollHeight}px`;
+          }}
+          rows={1}
+          enterKeyHint="send"
+          placeholder="Ask a question..."
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              handleSubmit(e);
+            }
+          }}
+          className="flex-1 bg-transparent text-base sm:text-sm text-foreground outline-none disabled:opacity-50 resize-none max-h-32 leading-relaxed placeholder:text-muted-foreground"
+        />
+        <button
+          type="submit"
+          disabled={isLoading || !input.trim()}
+          className="bg-primary text-primary-foreground rounded-full p-1.5 hover:bg-primary/90 transition-colors disabled:opacity-30 shrink-0"
+          aria-label="Send message"
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <line x1="12" y1="19" x2="12" y2="5" />
+            <polyline points="5 12 12 5 19 12" />
+          </svg>
+        </button>
+      </form>
+    </>
+  );
+
+  return (
+    <>
+      {/* Ask AI trigger button */}
+      {!open && (
+        <button
+          onClick={() => setOpen(true)}
+          className="fixed z-50 bottom-4 left-1/2 -translate-x-1/2 sm:left-auto sm:translate-x-0 sm:right-4 flex items-center gap-2 px-4 py-2 rounded-lg border bg-background text-primary shadow-lg hover:bg-primary hover:text-primary-foreground transition-colors text-sm font-medium"
+          aria-label="Ask AI"
+        >
+          Ask AI
+          <kbd className="hidden sm:inline-flex items-center gap-0.5 text-xs opacity-60 font-mono">
+            <span>&#8984;</span>K
+          </kbd>
+        </button>
+      )}
+
+      {/* Desktop: resizable side pane -- always rendered, hidden on mobile via CSS */}
+      <aside
+        className={`hidden sm:flex fixed top-0 right-0 bottom-0 z-40 border-l bg-background transition-transform duration-150 ease-in-out ${open ? "translate-x-0" : "translate-x-full"}`}
+        style={{ width: desktopWidth }}
+        aria-hidden={!open}
+      >
+        {/* Resize handle */}
+        <div
+          onPointerDown={handleResizePointerDown}
+          className="absolute top-0 bottom-0 left-0 w-1.5 cursor-col-resize hover:bg-ring/30 active:bg-ring/50 transition-colors z-10"
+        />
+        <div className="flex flex-col flex-1 min-w-0">{chatPanel}</div>
+      </aside>
+
+      {/* Mobile: Sheet overlay/drawer -- only after mount to avoid flash on desktop */}
+      {hasMounted && !isDesktop && (
+        <Sheet open={open} onOpenChange={setOpen}>
+          <SheetContent
+            side="right"
+            showCloseButton={false}
+            overlayClassName="bg-background!"
+            className="inset-0! w-full! h-full! max-w-none! p-0 flex flex-col"
+            style={{ backgroundColor: "var(--background)", opacity: 1 }}
+          >
+            <SheetTitle className="sr-only">AI Chat</SheetTitle>
+            {chatPanel}
+          </SheetContent>
+        </Sheet>
+      )}
+    </>
   );
 }

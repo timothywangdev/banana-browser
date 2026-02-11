@@ -26,7 +26,8 @@ When answering questions:
 - Always base your answers on the actual documentation content
 - Be concise and accurate
 - If the docs don't cover a topic, say so honestly
-- Do NOT include source references or file paths in your response`;
+- Do NOT include source references or file paths in your response
+- Do NOT use emojis in your responses`;
 
 async function loadDocsFiles(): Promise<Record<string, string>> {
   const files: Record<string, string> = {};
