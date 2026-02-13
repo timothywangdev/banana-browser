@@ -10,9 +10,6 @@ use std::env;
 use std::fs;
 use std::process::exit;
 
-#[cfg(unix)]
-use libc;
-
 #[cfg(windows)]
 use windows_sys::Win32::Foundation::CloseHandle;
 #[cfg(windows)]
@@ -141,7 +138,7 @@ fn main() {
     let has_version = args.iter().any(|a| a == "--version" || a == "-V");
 
     if has_help {
-        if let Some(cmd) = clean.get(0) {
+        if let Some(cmd) = clean.first() {
             if print_command_help(cmd) {
                 return;
             }
@@ -161,14 +158,14 @@ fn main() {
     }
 
     // Handle install separately
-    if clean.get(0).map(|s| s.as_str()) == Some("install") {
+    if clean.first().map(|s| s.as_str()) == Some("install") {
         let with_deps = args.iter().any(|a| a == "--with-deps" || a == "-d");
         run_install(with_deps);
         return;
     }
 
     // Handle session separately (doesn't need daemon)
-    if clean.get(0).map(|s| s.as_str()) == Some("session") {
+    if clean.first().map(|s| s.as_str()) == Some("session") {
         run_session(&clean, &flags.session, flags.json);
         return;
     }
@@ -247,11 +244,7 @@ fn main() {
             } else {
                 None
             },
-            if flags.cli_args {
-                Some("--args")
-            } else {
-                None
-            },
+            if flags.cli_args { Some("--args") } else { None },
             if flags.cli_user_agent {
                 Some("--user-agent")
             } else {
@@ -267,8 +260,8 @@ fn main() {
             } else {
                 None
             },
-            flags.ignore_https_errors.then(|| "--ignore-https-errors"),
-            flags.cli_allow_file_access.then(|| "--allow-file-access"),
+            flags.ignore_https_errors.then_some("--ignore-https-errors"),
+            flags.cli_allow_file_access.then_some("--allow-file-access"),
         ]
         .into_iter()
         .flatten()
@@ -372,7 +365,7 @@ fn main() {
         } else {
             // It's a port number - validate and use cdpPort field
             let cdp_port: u16 = match cdp_value.parse::<u32>() {
-                Ok(p) if p == 0 => {
+                Ok(0) => {
                     let msg = "Invalid CDP port: port must be greater than 0".to_string();
                     if flags.json {
                         println!(r#"{{"success":false,"error":"{}"}}"#, msg);
