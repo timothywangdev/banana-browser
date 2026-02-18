@@ -275,10 +275,21 @@ pub fn print_response(resp: &Response, json_mode: bool, action: Option<&str>) {
         // Recording start (has "started" field)
         if let Some(started) = data.get("started").and_then(|v| v.as_bool()) {
             if started {
-                if let Some(path) = data.get("path").and_then(|v| v.as_str()) {
-                    println!("{} Recording started: {}", color::success_indicator(), path);
-                } else {
-                    println!("{} Recording started", color::success_indicator());
+                match action {
+                    Some("profiler_start") => {
+                        println!("{} Profiling started", color::success_indicator());
+                    }
+                    _ => {
+                        if let Some(path) = data.get("path").and_then(|v| v.as_str()) {
+                            println!(
+                                "{} Recording started: {}",
+                                color::success_indicator(),
+                                path
+                            );
+                        } else {
+                            println!("{} Recording started", color::success_indicator());
+                        }
+                    }
                 }
                 return;
             }
@@ -366,6 +377,12 @@ pub fn print_response(resp: &Response, json_mode: bool, action: Option<&str>) {
                     "{} Trace saved to {}",
                     color::success_indicator(),
                     color::green(path)
+                ),
+                "profiler_stop" => println!(
+                    "{} Profile saved to {} ({} events)",
+                    color::success_indicator(),
+                    color::green(path),
+                    data.get("eventCount").and_then(|c| c.as_u64()).unwrap_or(0)
                 ),
                 "har_stop" => println!(
                     "{} HAR saved to {}",
@@ -1471,6 +1488,46 @@ Examples:
 "##
         }
 
+        // === Profile (CDP Tracing) ===
+        "profiler" => {
+            r##"
+agent-browser profiler - Record Chrome DevTools performance profile
+
+Usage: agent-browser profiler <operation> [options]
+
+Record a performance profile using Chrome DevTools Protocol (CDP) Tracing.
+The output JSON file can be loaded into Chrome DevTools Performance panel,
+Perfetto UI (https://ui.perfetto.dev/), or other trace analysis tools.
+
+Operations:
+  start                Start profiling
+  stop [path]          Stop profiling and save to file
+
+Start Options:
+  --categories <list>  Comma-separated trace categories (default includes
+                       devtools.timeline, v8.execute, blink, and others)
+
+Global Options:
+  --json               Output as JSON
+  --session <name>     Use specific session
+
+Examples:
+  # Basic profiling
+  agent-browser profiler start
+  agent-browser navigate https://example.com
+  agent-browser click "#button"
+  agent-browser profiler stop ./trace.json
+
+  # With custom categories
+  agent-browser profiler start --categories "devtools.timeline,v8.execute,blink.user_timing"
+  agent-browser profiler stop ./custom-trace.json
+
+The output file can be viewed in:
+  - Chrome DevTools: Performance panel > Load profile
+  - Perfetto: https://ui.perfetto.dev/
+"##
+        }
+
         // === Record (video) ===
         "record" => {
             r##"
@@ -1833,7 +1890,8 @@ Tabs:
   tab [new|list|close|<n>]   Manage tabs
 
 Debug:
-  trace start|stop [path]    Record trace
+  trace start|stop [path]    Record Playwright trace
+  profiler start|stop [path] Record Chrome DevTools profile
   record start <path> [url]  Start video recording (WebM)
   record stop                Stop and save video
   console [--clear]          View console logs

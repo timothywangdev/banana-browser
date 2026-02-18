@@ -579,6 +579,33 @@ export interface TraceStopCommand extends BaseCommand {
   path?: string;
 }
 
+/**
+ * Chrome Trace Event format. All fields are optional because CDP trace event
+ * shapes vary across categories and event phases -- this type is intentionally
+ * loose to accept any valid trace event without data loss.
+ */
+export interface TraceEvent {
+  cat?: string;
+  name?: string;
+  ph?: string;
+  pid?: number;
+  tid?: number;
+  ts?: number;
+  dur?: number;
+  args?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface ProfilerStartCommand extends BaseCommand {
+  action: 'profiler_start';
+  categories?: string[]; // Optional trace categories (e.g., "devtools.timeline")
+}
+
+export interface ProfilerStopCommand extends BaseCommand {
+  action: 'profiler_stop';
+  path?: string;
+}
+
 // HAR recording
 export interface HarStartCommand extends BaseCommand {
   action: 'har_start';
@@ -924,6 +951,8 @@ export type Command =
   | RecordingRestartCommand
   | TraceStartCommand
   | TraceStopCommand
+  | ProfilerStartCommand
+  | ProfilerStopCommand
   | HarStartCommand
   | HarStopCommand
   | StorageStateSaveCommand

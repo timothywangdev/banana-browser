@@ -374,6 +374,16 @@ const traceStopSchema = baseCommandSchema.extend({
   path: z.string().min(1).optional(),
 });
 
+const profilerStartSchema = baseCommandSchema.extend({
+  action: z.literal('profiler_start'),
+  categories: z.array(z.string()).optional(),
+});
+
+const profilerStopSchema = baseCommandSchema.extend({
+  action: z.literal('profiler_stop'),
+  path: z.string().min(1).optional(),
+});
+
 const harStartSchema = baseCommandSchema.extend({
   action: z.literal('har_start'),
 });
@@ -898,6 +908,8 @@ const commandSchema = z.discriminatedUnion('action', [
   recordingRestartSchema,
   traceStartSchema,
   traceStopSchema,
+  profilerStartSchema,
+  profilerStopSchema,
   harStartSchema,
   harStopSchema,
   stateSaveSchema,

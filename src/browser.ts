@@ -17,7 +17,8 @@ import {
 import path from 'node:path';
 import os from 'node:os';
 import { existsSync, mkdirSync, rmSync, readFileSync } from 'node:fs';
-import type { LaunchCommand } from './types.js';
+import { writeFile, mkdir } from 'node:fs/promises';
+import type { LaunchCommand, TraceEvent } from './types.js';
 import { type RefMap, type EnhancedSnapshot, getEnhancedSnapshot, parseRef } from './snapshot.js';
 import { safeHeaderMerge } from './state-utils.js';
 import {
@@ -119,6 +120,15 @@ export class BrowserManager {
     this.launchWarnings = [];
     return warnings;
   }
+
+  // CDP profiling state
+  private static readonly MAX_PROFILE_EVENTS = 5_000_000;
+  private profilingActive: boolean = false;
+  private profileChunks: TraceEvent[] = [];
+  private profileEventsDropped: boolean = false;
+  private profileCompleteResolver: (() => void) | null = null;
+  private profileDataHandler: ((params: { value?: TraceEvent[] }) => void) | null = null;
+  private profileCompleteHandler: (() => void) | null = null;
 
   /**
    * Check if browser is launched
@@ -1819,6 +1829,156 @@ export class BrowserManager {
   }
 
   /**
+   * Check if profiling is currently active
+   */
+  isProfilingActive(): boolean {
+    return this.profilingActive;
+  }
+
+  /**
+   * Start CDP profiling (Tracing)
+   */
+  async startProfiling(options?: { categories?: string[] }): Promise<void> {
+    if (this.profilingActive) {
+      throw new Error('Profiling already active');
+    }
+
+    const cdp = await this.getCDPSession();
+
+    const dataHandler = (params: { value?: TraceEvent[] }) => {
+      if (params.value) {
+        for (const evt of params.value) {
+          if (this.profileChunks.length >= BrowserManager.MAX_PROFILE_EVENTS) {
+            if (!this.profileEventsDropped) {
+              this.profileEventsDropped = true;
+              console.warn(
+                `Profiling: exceeded ${BrowserManager.MAX_PROFILE_EVENTS} events, dropping further data`
+              );
+            }
+            return;
+          }
+          this.profileChunks.push(evt);
+        }
+      }
+    };
+
+    const completeHandler = () => {
+      if (this.profileCompleteResolver) {
+        this.profileCompleteResolver();
+      }
+    };
+
+    cdp.on('Tracing.dataCollected', dataHandler);
+    cdp.on('Tracing.tracingComplete', completeHandler);
+
+    const categories = options?.categories ?? [
+      'devtools.timeline',
+      'disabled-by-default-devtools.timeline',
+      'disabled-by-default-devtools.timeline.frame',
+      'disabled-by-default-devtools.timeline.stack',
+      'v8.execute',
+      'disabled-by-default-v8.cpu_profiler',
+      'disabled-by-default-v8.cpu_profiler.hires',
+      'v8',
+      'disabled-by-default-v8.runtime_stats',
+      'blink',
+      'blink.user_timing',
+      'latencyInfo',
+      'renderer.scheduler',
+      'sequence_manager',
+      'toplevel',
+    ];
+
+    try {
+      await cdp.send('Tracing.start', {
+        traceConfig: {
+          includedCategories: categories,
+          enableSampling: true,
+        },
+        transferMode: 'ReportEvents',
+      });
+    } catch (error) {
+      cdp.off('Tracing.dataCollected', dataHandler);
+      cdp.off('Tracing.tracingComplete', completeHandler);
+      throw error;
+    }
+
+    // Only commit state after the CDP call succeeds
+    this.profilingActive = true;
+    this.profileChunks = [];
+    this.profileEventsDropped = false;
+    this.profileDataHandler = dataHandler;
+    this.profileCompleteHandler = completeHandler;
+  }
+
+  /**
+   * Stop CDP profiling and save to file
+   */
+  async stopProfiling(outputPath: string): Promise<{ path: string; eventCount: number }> {
+    if (!this.profilingActive) {
+      throw new Error('No profiling session active');
+    }
+
+    const cdp = await this.getCDPSession();
+
+    const TRACE_TIMEOUT_MS = 30_000;
+    const completePromise = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error('Profiling data collection timed out')),
+        TRACE_TIMEOUT_MS
+      );
+      this.profileCompleteResolver = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+    });
+
+    await cdp.send('Tracing.end');
+
+    let chunks: TraceEvent[];
+    try {
+      await completePromise;
+      chunks = this.profileChunks;
+    } finally {
+      if (this.profileDataHandler) {
+        cdp.off('Tracing.dataCollected', this.profileDataHandler);
+      }
+      if (this.profileCompleteHandler) {
+        cdp.off('Tracing.tracingComplete', this.profileCompleteHandler);
+      }
+      this.profilingActive = false;
+      this.profileChunks = [];
+      this.profileEventsDropped = false;
+      this.profileCompleteResolver = null;
+      this.profileDataHandler = null;
+      this.profileCompleteHandler = null;
+    }
+
+    const clockDomain =
+      process.platform === 'linux'
+        ? 'LINUX_CLOCK_MONOTONIC'
+        : process.platform === 'darwin'
+          ? 'MAC_MACH_ABSOLUTE_TIME'
+          : undefined;
+
+    const traceData: Record<string, unknown> = {
+      traceEvents: chunks,
+    };
+    if (clockDomain) {
+      traceData.metadata = { 'clock-domain': clockDomain };
+    }
+
+    const dir = path.dirname(outputPath);
+    await mkdir(dir, { recursive: true });
+
+    await writeFile(outputPath, JSON.stringify(traceData));
+
+    const eventCount = chunks.length;
+
+    return { path: outputPath, eventCount };
+  }
+
+  /**
    * Inject a mouse event via CDP
    */
   async injectMouseEvent(params: {
@@ -2129,6 +2289,26 @@ export class BrowserManager {
     // Stop screencast if active
     if (this.screencastActive) {
       await this.stopScreencast();
+    }
+
+    // Clean up profiling state if active (without saving)
+    if (this.profilingActive) {
+      const cdp = this.cdpSession;
+      if (cdp) {
+        if (this.profileDataHandler) {
+          cdp.off('Tracing.dataCollected', this.profileDataHandler);
+        }
+        if (this.profileCompleteHandler) {
+          cdp.off('Tracing.tracingComplete', this.profileCompleteHandler);
+        }
+        await cdp.send('Tracing.end').catch(() => {});
+      }
+      this.profilingActive = false;
+      this.profileChunks = [];
+      this.profileEventsDropped = false;
+      this.profileCompleteResolver = null;
+      this.profileDataHandler = null;
+      this.profileCompleteHandler = null;
     }
 
     // Clean up CDP session
