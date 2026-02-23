@@ -97,6 +97,15 @@ export class BrowserManager {
   private refMap: RefMap = {};
   private lastSnapshot: string = '';
   private scopedHeaderRoutes: Map<string, (route: Route) => Promise<void>> = new Map();
+  private colorScheme: 'light' | 'dark' | 'no-preference' | null = null;
+
+  /**
+   * Set the persistent color scheme preference.
+   * Applied automatically to all new pages and contexts.
+   */
+  setColorScheme(scheme: 'light' | 'dark' | 'no-preference' | null): void {
+    this.colorScheme = scheme;
+  }
 
   // CDP session for screencast and input injection
   private cdpSession: CDPSession | null = null;
@@ -252,7 +261,9 @@ export class BrowserManager {
     if (this.contexts.length > 0) {
       context = this.contexts[this.contexts.length - 1];
     } else if (this.browser) {
-      context = await this.browser.newContext();
+      context = await this.browser.newContext({
+        ...(this.colorScheme && { colorScheme: this.colorScheme }),
+      });
       context.setDefaultTimeout(60000);
       this.contexts.push(context);
       this.setupContextTracking(context);
@@ -1140,6 +1151,10 @@ export class BrowserManager {
       }
     }
 
+    if (options.colorScheme) {
+      this.colorScheme = options.colorScheme;
+    }
+
     if (cdpEndpoint) {
       await this.connectViaCDP(cdpEndpoint);
       return;
@@ -1224,6 +1239,7 @@ export class BrowserManager {
           userAgent: options.userAgent,
           ...(options.proxy && { proxy: options.proxy }),
           ignoreHTTPSErrors: options.ignoreHTTPSErrors ?? false,
+          ...(this.colorScheme && { colorScheme: this.colorScheme }),
         }
       );
       this.isPersistentContext = true;
@@ -1240,6 +1256,7 @@ export class BrowserManager {
         userAgent: options.userAgent,
         ...(options.proxy && { proxy: options.proxy }),
         ignoreHTTPSErrors: options.ignoreHTTPSErrors ?? false,
+        ...(this.colorScheme && { colorScheme: this.colorScheme }),
       });
       this.isPersistentContext = true;
     } else {
@@ -1325,6 +1342,7 @@ export class BrowserManager {
         storageState,
         ...(options.proxy && { proxy: options.proxy }),
         ignoreHTTPSErrors: options.ignoreHTTPSErrors ?? false,
+        ...(this.colorScheme && { colorScheme: this.colorScheme }),
       });
     }
 
@@ -1555,6 +1573,10 @@ export class BrowserManager {
    * Set up console, error, and close tracking for a page
    */
   private setupPageTracking(page: Page): void {
+    if (this.colorScheme) {
+      page.emulateMedia({ colorScheme: this.colorScheme }).catch(() => {});
+    }
+
     page.on('console', (msg) => {
       this.consoleMessages.push({
         type: msg.type(),
@@ -1642,6 +1664,7 @@ export class BrowserManager {
 
     const context = await this.browser.newContext({
       viewport: viewport === undefined ? { width: 1280, height: 720 } : viewport,
+      ...(this.colorScheme && { colorScheme: this.colorScheme }),
     });
     context.setDefaultTimeout(60000);
     this.contexts.push(context);
@@ -2381,6 +2404,7 @@ export class BrowserManager {
     this.kernelApiKey = null;
     this.isPersistentContext = false;
     this.activePageIndex = 0;
+    this.colorScheme = null;
     this.refMap = {};
     this.lastSnapshot = '';
     this.frameCallback = null;

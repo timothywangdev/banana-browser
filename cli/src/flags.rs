@@ -33,6 +33,7 @@ pub struct Config {
     pub auto_connect: Option<bool>,
     pub headers: Option<String>,
     pub annotate: Option<bool>,
+    pub color_scheme: Option<String>,
 }
 
 impl Config {
@@ -66,6 +67,7 @@ impl Config {
             auto_connect: other.auto_connect.or(self.auto_connect),
             headers: other.headers.or(self.headers),
             annotate: other.annotate.or(self.annotate),
+            color_scheme: other.color_scheme.or(self.color_scheme),
         }
     }
 }
@@ -129,6 +131,7 @@ fn extract_config_path(args: &[String]) -> Option<Option<String>> {
         "--provider",
         "--device",
         "--session-name",
+        "--color-scheme",
     ];
     let mut i = 0;
     while i < args.len() {
@@ -199,6 +202,7 @@ pub struct Flags {
     pub auto_connect: bool,
     pub session_name: Option<String>,
     pub annotate: bool,
+    pub color_scheme: Option<String>,
 
     // Track which launch-time options were explicitly passed via CLI
     // (as opposed to being set only via environment variables)
@@ -278,6 +282,8 @@ pub fn parse_flags(args: &[String]) -> Flags {
             .or(config.session_name),
         annotate: env_var_is_truthy("AGENT_BROWSER_ANNOTATE")
             || config.annotate.unwrap_or(false),
+        color_scheme: env::var("AGENT_BROWSER_COLOR_SCHEME").ok()
+            .or(config.color_scheme),
         cli_executable_path: false,
         cli_extensions: false,
         cli_profile: false,
@@ -425,6 +431,12 @@ pub fn parse_flags(args: &[String]) -> Flags {
                 flags.annotate = val;
                 if consumed { i += 1; }
             }
+            "--color-scheme" => {
+                if let Some(s) = args.get(i + 1) {
+                    flags.color_scheme = Some(s.clone());
+                    i += 1;
+                }
+            }
             "--config" => {
                 // Already handled by load_config(); skip the value
                 i += 1;
@@ -468,6 +480,7 @@ pub fn clean_args(args: &[String]) -> Vec<String> {
         "--provider",
         "--device",
         "--session-name",
+        "--color-scheme",
         "--config",
     ];
 

@@ -418,6 +418,13 @@ export async function startDaemon(options?: {
 
               const ignoreHTTPSErrors = process.env.AGENT_BROWSER_IGNORE_HTTPS_ERRORS === '1';
               const allowFileAccess = process.env.AGENT_BROWSER_ALLOW_FILE_ACCESS === '1';
+              const colorSchemeEnv = process.env.AGENT_BROWSER_COLOR_SCHEME;
+              const colorScheme =
+                colorSchemeEnv === 'dark' ||
+                colorSchemeEnv === 'light' ||
+                colorSchemeEnv === 'no-preference'
+                  ? colorSchemeEnv
+                  : undefined;
               await manager.launch({
                 id: 'auto',
                 action: 'launch' as const,
@@ -431,6 +438,7 @@ export async function startDaemon(options?: {
                 proxy,
                 ignoreHTTPSErrors: ignoreHTTPSErrors,
                 allowFileAccess: allowFileAccess,
+                colorScheme,
                 autoStateFilePath: getSessionAutoStatePath(),
               });
             }

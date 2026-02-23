@@ -2069,6 +2069,9 @@ async function handleEmulateMedia(
     reducedMotion: command.reducedMotion,
     forcedColors: command.forcedColors,
   });
+  if (command.colorScheme) {
+    browser.setColorScheme(command.colorScheme);
+  }
   return successResponse(command.id, { emulated: true });
 }
 

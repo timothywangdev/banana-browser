@@ -60,6 +60,21 @@ This is useful when:
 - You want a zero-configuration connection to your existing browser
 - You don't want to track which port Chrome is using
 
+## Color scheme
+
+Playwright overrides the browser's color scheme to `light` by default when connecting via CDP. Use `--color-scheme` to set a persistent preference:
+
+```bash
+agent-browser --cdp 9222 --color-scheme dark open https://example.com
+agent-browser --cdp 9222 snapshot  # stays in dark mode
+```
+
+Or set it globally via config or environment variable:
+
+```bash
+AGENT_BROWSER_COLOR_SCHEME=dark agent-browser --cdp 9222 open https://example.com
+```
+
 ## Use cases
 
 This enables control of:
@@ -93,6 +108,7 @@ This enables control of:
     <tr><td><code>--headed</code></td><td>Show browser window</td></tr>
     <tr><td><code>{"--cdp <port|url>"}</code></td><td>CDP connection (port or WebSocket URL)</td></tr>
     <tr><td><code>--auto-connect</code></td><td>Auto-discover and connect to running Chrome</td></tr>
+    <tr><td><code>--color-scheme &lt;scheme&gt;</code></td><td>Persistent color scheme (<code>dark</code>, <code>light</code>, <code>no-preference</code>)</td></tr>
     <tr><td><code>--debug</code></td><td>Debug output</td></tr>
   </tbody>
 </table>

@@ -49,6 +49,7 @@ const launchSchema = baseCommandSchema.extend({
   provider: z.string().optional(),
   ignoreHTTPSErrors: z.boolean().optional(),
   allowFileAccess: z.boolean().optional(),
+  colorScheme: z.enum(['light', 'dark', 'no-preference']).optional(),
   profile: z.string().optional(),
   storageState: z.string().optional(),
 });
