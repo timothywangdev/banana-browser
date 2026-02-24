@@ -67,6 +67,7 @@ agent-browser press Enter             # Press key
 agent-browser keyboard type "text"    # Type at current focus (no selector)
 agent-browser keyboard inserttext "text"  # Insert without key events
 agent-browser scroll down 500         # Scroll page
+agent-browser scroll down 500 --selector "div.content"  # Scroll within a specific container
 
 # Get information
 agent-browser get text @e1            # Get element text

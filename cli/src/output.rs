@@ -973,13 +973,16 @@ Use Cases:
             r##"
 agent-browser scroll - Scroll the page
 
-Usage: agent-browser scroll [direction] [amount]
+Usage: agent-browser scroll [direction] [amount] [options]
 
-Scrolls the page in the specified direction.
+Scrolls the page or a specific element in the specified direction.
 
 Arguments:
   direction            up, down, left, right (default: down)
   amount               Pixels to scroll (default: 300)
+
+Options:
+  -s, --selector <sel> CSS selector for a scrollable container
 
 Global Options:
   --json               Output as JSON
@@ -990,6 +993,7 @@ Examples:
   agent-browser scroll down 500
   agent-browser scroll up 200
   agent-browser scroll left 100
+  agent-browser scroll down 500 --selector "div.scroll-container"
 "##
         }
         "scrollintoview" | "scrollinto" => {
