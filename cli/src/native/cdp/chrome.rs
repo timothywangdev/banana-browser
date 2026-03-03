@@ -127,6 +127,10 @@ pub fn launch_chrome(options: &LaunchOptions) -> Result<ChromeProcess, String> {
 
     args.extend(options.args.iter().cloned());
 
+    if should_disable_sandbox(&args) {
+        args.push("--no-sandbox".to_string());
+    }
+
     let mut child = Command::new(&chrome_path)
         .args(&args)
         .stdin(Stdio::null())
@@ -149,18 +153,81 @@ pub fn launch_chrome(options: &LaunchOptions) -> Result<ChromeProcess, String> {
 fn wait_for_ws_url(reader: BufReader<std::process::ChildStderr>) -> Result<String, String> {
     let deadline = std::time::Instant::now() + Duration::from_secs(30);
     let prefix = "DevTools listening on ";
+    let mut stderr_lines: Vec<String> = Vec::new();
 
     for line in reader.lines() {
         if std::time::Instant::now() > deadline {
-            return Err("Timeout waiting for Chrome DevTools URL".to_string());
+            return Err(chrome_launch_error(
+                "Timeout waiting for Chrome DevTools URL",
+                &stderr_lines,
+            ));
         }
         let line = line.map_err(|e| format!("Failed to read Chrome stderr: {}", e))?;
         if let Some(url) = line.strip_prefix(prefix) {
             return Ok(url.trim().to_string());
         }
+        stderr_lines.push(line);
     }
 
-    Err("Chrome exited before providing DevTools URL".to_string())
+    Err(chrome_launch_error(
+        "Chrome exited before providing DevTools URL",
+        &stderr_lines,
+    ))
+}
+
+fn chrome_launch_error(message: &str, stderr_lines: &[String]) -> String {
+    let relevant: Vec<&String> = stderr_lines
+        .iter()
+        .filter(|l| {
+            let lower = l.to_lowercase();
+            lower.contains("error")
+                || lower.contains("fatal")
+                || lower.contains("sandbox")
+                || lower.contains("namespace")
+                || lower.contains("permission")
+                || lower.contains("cannot")
+                || lower.contains("failed")
+                || lower.contains("abort")
+        })
+        .collect();
+
+    if relevant.is_empty() {
+        if stderr_lines.is_empty() {
+            return format!("{} (no stderr output from Chrome)", message);
+        }
+        let last_lines: Vec<&String> = stderr_lines.iter().rev().take(5).collect();
+        return format!(
+            "{}\nChrome stderr (last {} lines):\n  {}",
+            message,
+            last_lines.len(),
+            last_lines
+                .into_iter()
+                .rev()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join("\n  ")
+        );
+    }
+
+    let hint = if relevant.iter().any(|l| {
+        let lower = l.to_lowercase();
+        lower.contains("sandbox") || lower.contains("namespace")
+    }) {
+        "\nHint: try --args \"--no-sandbox\" (required in containers, VMs, and some Linux setups)"
+    } else {
+        ""
+    };
+
+    format!(
+        "{}\nChrome stderr:\n  {}{}",
+        message,
+        relevant
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join("\n  "),
+        hint
+    )
 }
 
 pub fn find_chrome() -> Option<PathBuf> {
@@ -176,6 +243,10 @@ pub fn find_chrome() -> Option<PathBuf> {
             if p.exists() {
                 return Some(p);
             }
+        }
+
+        if let Some(p) = find_playwright_chromium() {
+            return Some(p);
         }
     }
 
@@ -196,6 +267,10 @@ pub fn find_chrome() -> Option<PathBuf> {
                     }
                 }
             }
+        }
+
+        if let Some(p) = find_playwright_chromium() {
+            return Some(p);
         }
     }
 
@@ -369,6 +444,106 @@ fn get_chrome_user_data_dirs() -> Vec<PathBuf> {
     dirs
 }
 
+/// Returns true if Chrome's sandbox should be disabled because the environment
+/// doesn't support it (containers, VMs, running as root).
+fn should_disable_sandbox(existing_args: &[String]) -> bool {
+    if existing_args.iter().any(|a| a == "--no-sandbox") {
+        return false; // already set by user
+    }
+
+    #[cfg(unix)]
+    {
+        // Root user -- standard container default, Chrome sandbox requires non-root
+        if unsafe { libc::geteuid() } == 0 {
+            return true;
+        }
+
+        // Docker container
+        if Path::new("/.dockerenv").exists() {
+            return true;
+        }
+
+        // Podman container
+        if Path::new("/run/.containerenv").exists() {
+            return true;
+        }
+
+        // Generic container detection: cgroup contains docker/kubepods/lxc
+        if let Ok(cgroup) = std::fs::read_to_string("/proc/1/cgroup") {
+            if cgroup.contains("docker")
+                || cgroup.contains("kubepods")
+                || cgroup.contains("lxc")
+            {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+/// Search Playwright's browser cache for a Chromium binary.
+/// This is where `agent-browser install` (via `npx playwright install chromium`) puts it.
+fn find_playwright_chromium() -> Option<PathBuf> {
+    let mut search_dirs = Vec::new();
+
+    if let Ok(custom) = std::env::var("PLAYWRIGHT_BROWSERS_PATH") {
+        search_dirs.push(PathBuf::from(custom));
+    }
+
+    if let Some(home) = dirs::home_dir() {
+        search_dirs.push(home.join(".cache/ms-playwright"));
+    }
+
+    for dir in &search_dirs {
+        if !dir.is_dir() {
+            continue;
+        }
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            let mut matches: Vec<PathBuf> = entries
+                .filter_map(|e| e.ok())
+                .filter(|e| {
+                    e.file_name()
+                        .to_str()
+                        .map(|n| n.starts_with("chromium-"))
+                        .unwrap_or(false)
+                })
+                .filter_map(|e| {
+                    let candidate = build_playwright_binary_path(&e.path());
+                    if candidate.exists() {
+                        Some(candidate)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            // Sort descending so the newest version wins
+            matches.sort();
+            matches.reverse();
+            if let Some(p) = matches.into_iter().next() {
+                return Some(p);
+            }
+        }
+    }
+
+    None
+}
+
+#[cfg(target_os = "linux")]
+fn build_playwright_binary_path(chromium_dir: &Path) -> PathBuf {
+    chromium_dir.join("chrome-linux64/chrome")
+}
+
+#[cfg(target_os = "macos")]
+fn build_playwright_binary_path(chromium_dir: &Path) -> PathBuf {
+    chromium_dir.join("chrome-mac/Chromium.app/Contents/MacOS/Chromium")
+}
+
+#[cfg(target_os = "windows")]
+fn build_playwright_binary_path(chromium_dir: &Path) -> PathBuf {
+    chromium_dir.join("chrome-win/chrome.exe")
+}
+
 fn expand_tilde(path: &str) -> String {
     if let Some(rest) = path.strip_prefix('~') {
         if let Some(home) = dirs::home_dir() {
@@ -412,6 +587,49 @@ mod tests {
     #[test]
     fn test_read_devtools_active_port_missing() {
         let result = read_devtools_active_port(Path::new("/nonexistent"));
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_should_disable_sandbox_skips_if_already_set() {
+        let args = vec!["--headless=new".to_string(), "--no-sandbox".to_string()];
+        assert!(!should_disable_sandbox(&args));
+    }
+
+    #[test]
+    fn test_chrome_launch_error_no_stderr() {
+        let msg = chrome_launch_error("Chrome exited", &[]);
+        assert!(msg.contains("no stderr output"));
+    }
+
+    #[test]
+    fn test_chrome_launch_error_with_sandbox_hint() {
+        let lines = vec![
+            "some log line".to_string(),
+            "Failed to move to new namespace: sandbox error".to_string(),
+        ];
+        let msg = chrome_launch_error("Chrome exited", &lines);
+        assert!(msg.contains("sandbox error"));
+        assert!(msg.contains("Hint:"));
+        assert!(msg.contains("--no-sandbox"));
+    }
+
+    #[test]
+    fn test_chrome_launch_error_generic() {
+        let lines = vec![
+            "info line".to_string(),
+            "another info line".to_string(),
+        ];
+        let msg = chrome_launch_error("Chrome exited", &lines);
+        assert!(msg.contains("last 2 lines"));
+    }
+
+    #[test]
+    fn test_find_playwright_chromium_nonexistent() {
+        // With no Playwright cache, should return None
+        std::env::set_var("PLAYWRIGHT_BROWSERS_PATH", "/nonexistent/path");
+        let result = find_playwright_chromium();
+        std::env::remove_var("PLAYWRIGHT_BROWSERS_PATH");
         assert!(result.is_none());
     }
 }
