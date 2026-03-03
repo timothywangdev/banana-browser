@@ -31,6 +31,15 @@ use std::process::Command as ProcessCommand;
 fn run_auth_cli(cmd: &serde_json::Value, json_mode: bool) -> ! {
     let exe_path = env::current_exe().unwrap_or_default();
     let exe_path = exe_path.canonicalize().unwrap_or(exe_path);
+    #[cfg(windows)]
+    let exe_path = {
+        let p = exe_path.to_string_lossy();
+        if let Some(stripped) = p.strip_prefix(r"\\?\") {
+            PathBuf::from(stripped)
+        } else {
+            exe_path
+        }
+    };
     let exe_dir = exe_path.parent().unwrap_or(std::path::Path::new("."));
 
     let mut script_paths = vec![
@@ -231,6 +240,13 @@ fn main() {
     #[cfg(unix)]
     unsafe {
         libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+
+    // Prevent MSYS/Git Bash path translation from mangling arguments
+    #[cfg(windows)]
+    {
+        env::set_var("MSYS_NO_PATHCONV", "1");
+        env::set_var("MSYS2_ARG_CONV_EXCL", "*");
     }
 
     let args: Vec<String> = env::args().skip(1).collect();
