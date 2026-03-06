@@ -146,6 +146,13 @@ impl BrowserProcess {
             BrowserProcess::Lightpanda(p) => p.kill(),
         }
     }
+
+    pub fn wait_or_kill(&mut self, timeout: std::time::Duration) {
+        match self {
+            BrowserProcess::Chrome(p) => p.wait_or_kill(timeout),
+            BrowserProcess::Lightpanda(p) => p.kill(),
+        }
+    }
 }
 
 pub struct BrowserManager {
@@ -583,8 +590,12 @@ impl BrowserManager {
             .send_command_no_params("Browser.close", None)
             .await;
 
-        if let Some(ref mut process) = self.browser_process {
-            process.kill();
+        if let Some(mut process) = self.browser_process.take() {
+            let timeout = std::time::Duration::from_secs(5);
+            let _ = tokio::task::spawn_blocking(move || {
+                process.wait_or_kill(timeout);
+            })
+            .await;
         }
 
         Ok(())
