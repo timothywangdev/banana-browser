@@ -79,9 +79,7 @@ fn validate_lightpanda_options(options: &LaunchOptions) -> Result<(), String> {
         return Err("Headed mode is not supported with Lightpanda (headless only)".to_string());
     }
     if !options.args.is_empty() {
-        return Err(
-            "Custom Chrome arguments (--args) are not supported with Lightpanda".to_string(),
-        );
+        return Err("Custom Chrome arguments (--args) are not supported with Lightpanda".to_string());
     }
     Ok(())
 }
@@ -117,6 +115,7 @@ pub struct PageInfo {
     pub session_id: String,
     pub url: String,
     pub title: String,
+    pub target_type: String, // "page" or "webview"
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -145,13 +144,6 @@ impl BrowserProcess {
     pub fn kill(&mut self) {
         match self {
             BrowserProcess::Chrome(p) => p.kill(),
-            BrowserProcess::Lightpanda(p) => p.kill(),
-        }
-    }
-
-    pub fn wait_or_kill(&mut self, timeout: std::time::Duration) {
-        match self {
-            BrowserProcess::Chrome(p) => p.wait_or_kill(timeout),
             BrowserProcess::Lightpanda(p) => p.kill(),
         }
     }
@@ -315,7 +307,7 @@ impl BrowserManager {
         let page_targets: Vec<TargetInfo> = result
             .target_infos
             .into_iter()
-            .filter(|t| t.target_type == "page" && !t.url.is_empty())
+            .filter(|t| (t.target_type == "page" || t.target_type == "webview") && !t.url.is_empty())
             .collect();
 
         if page_targets.is_empty() {
@@ -348,6 +340,7 @@ impl BrowserManager {
                 session_id: attach_result.session_id.clone(),
                 url: "about:blank".to_string(),
                 title: String::new(),
+                target_type: "page".to_string(),
             });
             self.active_page_index = 0;
             self.enable_domains(&attach_result.session_id).await?;
@@ -370,6 +363,7 @@ impl BrowserManager {
                     session_id: attach_result.session_id.clone(),
                     url: target.url.clone(),
                     title: target.title.clone(),
+                    target_type: target.target_type.clone(),
                 });
             }
 
@@ -592,12 +586,8 @@ impl BrowserManager {
             .send_command_no_params("Browser.close", None)
             .await;
 
-        if let Some(mut process) = self.browser_process.take() {
-            let timeout = std::time::Duration::from_secs(5);
-            let _ = tokio::task::spawn_blocking(move || {
-                process.wait_or_kill(timeout);
-            })
-            .await;
+        if let Some(ref mut process) = self.browser_process {
+            process.kill();
         }
 
         Ok(())
@@ -664,6 +654,7 @@ impl BrowserManager {
             session_id: attach_result.session_id.clone(),
             url: "about:blank".to_string(),
             title: String::new(),
+            target_type: "page".to_string(),
         });
         self.active_page_index = 0;
         self.enable_domains(&attach_result.session_id).await?;
@@ -696,6 +687,7 @@ impl BrowserManager {
                     "index": i,
                     "title": p.title,
                     "url": p.url,
+                    "type": p.target_type,
                     "active": i == self.active_page_index,
                 })
             })
@@ -736,6 +728,7 @@ impl BrowserManager {
             session_id: attach.session_id,
             url: target_url.to_string(),
             title: String::new(),
+            target_type: "page".to_string(),
         });
         self.active_page_index = index;
 
