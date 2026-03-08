@@ -167,7 +167,8 @@ impl DaemonState {
                             if let Ok(te) =
                                 serde_json::from_value::<TargetCreatedEvent>(event.params.clone())
                             {
-                                if te.target_info.target_type == "page"
+                                if (te.target_info.target_type == "page"
+                                    || te.target_info.target_type == "webview")
                                     && !te.target_info.url.is_empty()
                                 {
                                     let already_tracked = self
@@ -443,6 +444,7 @@ pub async fn execute_command(cmd: &Value, state: &mut DaemonState) -> Value {
                     session_id: attach.session_id,
                     url: te.target_info.url.clone(),
                     title: te.target_info.title.clone(),
+                    target_type: te.target_info.target_type.clone(),
                 });
             }
         }
@@ -2468,6 +2470,7 @@ async fn handle_recording_start(cmd: &Value, state: &mut DaemonState) -> Result<
         session_id: new_session_id.clone(),
         url: nav_url.clone(),
         title: String::new(),
+        target_type: "page".to_string(),
     });
 
     // Navigate to URL
@@ -4057,6 +4060,7 @@ async fn handle_window_new(cmd: &Value, state: &mut DaemonState) -> Result<Value
         session_id: attach.session_id,
         url: "about:blank".to_string(),
         title: String::new(),
+        target_type: "page".to_string(),
     });
 
     if let Some(viewport) = cmd.get("viewport") {

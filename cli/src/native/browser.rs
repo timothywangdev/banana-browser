@@ -117,6 +117,7 @@ pub struct PageInfo {
     pub session_id: String,
     pub url: String,
     pub title: String,
+    pub target_type: String, // "page" or "webview"
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -315,7 +316,9 @@ impl BrowserManager {
         let page_targets: Vec<TargetInfo> = result
             .target_infos
             .into_iter()
-            .filter(|t| t.target_type == "page" && !t.url.is_empty())
+            .filter(|t| {
+                (t.target_type == "page" || t.target_type == "webview") && !t.url.is_empty()
+            })
             .collect();
 
         if page_targets.is_empty() {
@@ -348,6 +351,7 @@ impl BrowserManager {
                 session_id: attach_result.session_id.clone(),
                 url: "about:blank".to_string(),
                 title: String::new(),
+                target_type: "page".to_string(),
             });
             self.active_page_index = 0;
             self.enable_domains(&attach_result.session_id).await?;
@@ -370,6 +374,7 @@ impl BrowserManager {
                     session_id: attach_result.session_id.clone(),
                     url: target.url.clone(),
                     title: target.title.clone(),
+                    target_type: target.target_type.clone(),
                 });
             }
 
@@ -664,6 +669,7 @@ impl BrowserManager {
             session_id: attach_result.session_id.clone(),
             url: "about:blank".to_string(),
             title: String::new(),
+            target_type: "page".to_string(),
         });
         self.active_page_index = 0;
         self.enable_domains(&attach_result.session_id).await?;
@@ -696,6 +702,7 @@ impl BrowserManager {
                     "index": i,
                     "title": p.title,
                     "url": p.url,
+                    "type": p.target_type,
                     "active": i == self.active_page_index,
                 })
             })
@@ -736,6 +743,7 @@ impl BrowserManager {
             session_id: attach.session_id,
             url: target_url.to_string(),
             title: String::new(),
+            target_type: "page".to_string(),
         });
         self.active_page_index = index;
 
