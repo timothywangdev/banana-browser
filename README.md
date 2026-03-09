@@ -713,7 +713,40 @@ agent-browser --executable-path /path/to/chromium open example.com
 AGENT_BROWSER_EXECUTABLE_PATH=/path/to/chromium agent-browser open example.com
 ```
 
-### Serverless Example (Vercel/AWS Lambda)
+### Serverless (Vercel)
+
+Two patterns for using agent-browser from Next.js server actions on Vercel:
+
+**Vercel Sandbox** -- run agent-browser + Chrome in an ephemeral microVM. No external server needed:
+
+```typescript
+import { Sandbox } from "@vercel/sandbox";
+
+const sandbox = await Sandbox.create({ runtime: "node24" });
+await sandbox.runCommand("agent-browser", ["open", "https://example.com"]);
+const result = await sandbox.runCommand("agent-browser", ["screenshot", "--json"]);
+await sandbox.stop();
+```
+
+**External API server** -- host agent-browser on a server, call it from Vercel via HTTP:
+
+```typescript
+const res = await fetch(`${process.env.AGENT_BROWSER_API_URL}/api/run`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    commands: [
+      { action: "launch", headless: true },
+      { action: "navigate", url: "https://example.com" },
+      { action: "screenshot" },
+    ],
+  }),
+});
+```
+
+See the [demo app](examples/demo/) for a visual demo of agent-browser's core capabilities across different compute environments.
+
+### Serverless (AWS Lambda)
 
 ```typescript
 import chromium from '@sparticuz/chromium';
