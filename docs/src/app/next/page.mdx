@@ -4,102 +4,27 @@ export const metadata = pageMetadata("next")
 
 # Next.js + Vercel
 
-Two patterns for running agent-browser from Next.js on Vercel.
+Run agent-browser from a Next.js app on Vercel using Vercel Sandbox.
+A Linux microVM spins up on demand, runs agent-browser + Chrome, and
+shuts down. No binary size limits, no Chromium bundling complexity.
 
-## Pattern 1: Serverless Function
-
-Run `@sparticuz/chromium` + `puppeteer-core` directly inside a Vercel
-serverless function. No external server needed.
-
-### Setup
+## Setup
 
 ```bash
-pnpm add @sparticuz/chromium puppeteer-core
+pnpm add @vercel/sandbox
 ```
 
-### Browser launcher
-
-```ts
-import puppeteer from "puppeteer-core";
-import chromium from "@sparticuz/chromium";
-import fs from "node:fs";
-
-const CHROME_PATHS = [
-  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-  "/usr/bin/google-chrome",
-  "/usr/bin/chromium",
-  "/usr/bin/chromium-browser",
-];
-
-function findLocalChrome(): string {
-  for (const p of CHROME_PATHS) {
-    if (fs.existsSync(p)) return p;
-  }
-  throw new Error("Chrome not found. Set CHROMIUM_PATH.");
-}
-
-async function launchBrowser() {
-  const isLambda =
-    !!process.env.VERCEL || !!process.env.AWS_LAMBDA_FUNCTION_NAME;
-
-  return puppeteer.launch({
-    args: isLambda ? chromium.args : ["--no-sandbox"],
-    executablePath: isLambda
-      ? await chromium.executablePath()
-      : process.env.CHROMIUM_PATH || findLocalChrome(),
-    headless: true,
-    defaultViewport: { width: 1280, height: 720 },
-  });
-}
-```
-
-On Vercel, `@sparticuz/chromium` provides the binary automatically.
-Locally, the launcher finds your system Chrome or uses `CHROMIUM_PATH`.
-
-### Server action
-
-```ts
-"use server";
-
-export async function screenshotUrl(url: string) {
-  const browser = await launchBrowser();
-  try {
-    const page = await browser.newPage();
-    await page.goto(url, { waitUntil: "networkidle2", timeout: 30_000 });
-    const title = await page.title();
-    const screenshot = await page.screenshot({ encoding: "base64" });
-    return { ok: true, title, screenshot };
-  } finally {
-    await browser.close();
-  }
-}
-```
-
-### Next.js config
-
-```ts
-// next.config.ts
-const nextConfig = {
-  serverExternalPackages: ["@sparticuz/chromium"],
-};
-export default nextConfig;
-```
-
-## Pattern 2: Vercel Sandbox
-
-A Linux microVM spins up on demand, runs agent-browser + Chrome, and
-shuts down. No binary size limits. Best for multi-step workflows or
-when you need full Chrome capabilities.
-
-### Server action
+## Server action
 
 ```ts
 "use server";
 import { Sandbox } from "@vercel/sandbox";
 
-export async function screenshotUrl(url: string) {
-  const snapshotId = process.env.AGENT_BROWSER_SNAPSHOT_ID;
+const snapshotId = process.env.AGENT_BROWSER_SNAPSHOT_ID;
 
+async function withBrowser<T>(
+  fn: (sandbox: InstanceType<typeof Sandbox>) => Promise<T>,
+): Promise<T> {
   const sandbox = snapshotId
     ? await Sandbox.create({
         source: { type: "snapshot", snapshotId },
@@ -107,60 +32,95 @@ export async function screenshotUrl(url: string) {
       })
     : await Sandbox.create({ runtime: "node24", timeout: 120_000 });
 
-  try {
-    if (!snapshotId) {
-      await sandbox.runCommand("npm", ["install", "-g", "agent-browser"]);
-      await sandbox.runCommand("npx", ["agent-browser", "install"]);
-    }
+  if (!snapshotId) {
+    await sandbox.runCommand("npm", ["install", "-g", "agent-browser"]);
+    await sandbox.runCommand("npx", ["agent-browser", "install"]);
+  }
 
+  try {
+    return await fn(sandbox);
+  } finally {
+    await sandbox.stop();
+  }
+}
+
+export async function screenshotUrl(url: string) {
+  return withBrowser(async (sandbox) => {
     await sandbox.runCommand("agent-browser", ["open", url]);
 
     const result = await sandbox.runCommand("agent-browser", [
       "screenshot", "--json",
     ]);
-    const stdout = await result.stdout();
-    const data = JSON.parse(stdout);
+    const data = JSON.parse(await result.stdout());
 
     await sandbox.runCommand("agent-browser", ["close"]);
     return { ok: true, screenshot: data.data.base64 };
-  } finally {
-    await sandbox.stop();
-  }
+  });
+}
+
+export async function snapshotUrl(url: string) {
+  return withBrowser(async (sandbox) => {
+    await sandbox.runCommand("agent-browser", ["open", url]);
+
+    const result = await sandbox.runCommand("agent-browser", [
+      "snapshot", "-i", "-c",
+    ]);
+    const snapshot = await result.stdout();
+
+    await sandbox.runCommand("agent-browser", ["close"]);
+    return { ok: true, snapshot };
+  });
 }
 ```
 
-### Optimize with snapshots
+## Sandbox snapshots
 
-Installing agent-browser + Chromium takes ~30 seconds. Create a
-snapshot to make sandbox creation sub-second:
+Without optimization, each Sandbox run installs agent-browser + Chromium
+from scratch (~30 seconds). A **sandbox snapshot** is a saved VM image
+with everything pre-installed -- like a Docker image for Vercel Sandbox.
+When `AGENT_BROWSER_SNAPSHOT_ID` is set, the sandbox boots from that
+image instead of installing, bringing startup down to sub-second.
+
+This is different from an agent-browser *accessibility snapshot* (which
+dumps a page's accessibility tree). A sandbox snapshot is a Vercel
+infrastructure concept.
+
+Create a sandbox snapshot by running the helper script once:
 
 ```bash
 npx tsx scripts/create-snapshot.ts
-# Output: AGENT_BROWSER_SNAPSHOT_ID=snap_xxxxxxxxxxxx
 ```
 
-Add the snapshot ID to your Vercel environment variables or `.env.local`.
+The script spins up a fresh sandbox, installs agent-browser + Chromium,
+saves the VM state, and prints the snapshot ID:
+
+```
+AGENT_BROWSER_SNAPSHOT_ID=snap_xxxxxxxxxxxx
+```
+
+Add this to your Vercel project environment variables (or `.env.local`
+for local development). Recommended for any production deployment.
 
 ## Scheduled workflows (cron)
 
-For recurring tasks like daily monitoring, use Vercel Cron Jobs with
-either pattern:
+For recurring tasks like daily monitoring, use Vercel Cron Jobs:
 
 ```ts
 // app/api/cron/monitor/route.ts
 export async function GET() {
-  const browser = await launchBrowser();
-  try {
-    const page = await browser.newPage();
-    await page.goto("https://example.com/pricing", {
-      waitUntil: "networkidle2",
-    });
-    const snapshot = await page.accessibility.snapshot();
-    // Process results, send alerts, store in database...
-    return Response.json({ ok: true, snapshot });
-  } finally {
-    await browser.close();
-  }
+  const result = await withBrowser(async (sandbox) => {
+    await sandbox.runCommand("agent-browser", [
+      "open", "https://example.com/pricing",
+    ]);
+    const snap = await sandbox.runCommand("agent-browser", [
+      "snapshot", "-i", "-c",
+    ]);
+    await sandbox.runCommand("agent-browser", ["close"]);
+    return await snap.stdout();
+  });
+
+  // Process results, send alerts, store data...
+  return Response.json({ ok: true, snapshot: result });
 }
 ```
 
@@ -173,35 +133,18 @@ export async function GET() {
 }
 ```
 
-## When to use which pattern
-
-<table>
-  <thead>
-    <tr><th></th><th>Serverless Function</th><th>Vercel Sandbox</th></tr>
-  </thead>
-  <tbody>
-    <tr><td>Infrastructure</td><td>None (runs in-function)</td><td>None (Vercel manages VMs)</td></tr>
-    <tr><td>Startup time</td><td>~2-3 seconds</td><td>Sub-second with snapshot</td></tr>
-    <tr><td>Binary size limit</td><td>50MB compressed</td><td>None</td></tr>
-    <tr><td>Multi-step workflows</td><td>Single request only</td><td>Yes (persistent session)</td></tr>
-    <tr><td>Task duration</td><td>Up to 300s (Pro)</td><td>Up to ~2 minutes</td></tr>
-    <tr><td>Best for</td><td>Fast single-request screenshots</td><td>Complex workflows, full Chrome</td></tr>
-  </tbody>
-</table>
-
 ## Environment variables
 
 <table>
   <thead>
-    <tr><th>Variable</th><th>Pattern</th><th>Description</th></tr>
+    <tr><th>Variable</th><th>Description</th></tr>
   </thead>
   <tbody>
-    <tr><td><code>CHROMIUM_PATH</code></td><td>Serverless</td><td>Path to local Chrome/Chromium (auto-detected on Vercel)</td></tr>
-    <tr><td><code>AGENT_BROWSER_SNAPSHOT_ID</code></td><td>Sandbox</td><td>Pre-built snapshot for fast startup</td></tr>
+    <tr><td><code>AGENT_BROWSER_SNAPSHOT_ID</code></td><td>Sandbox snapshot ID for sub-second startup (see above)</td></tr>
   </tbody>
 </table>
 
 ## Demo app
 
-A working demo with both patterns, a UI, and a deploy-to-Vercel button is at
-[`examples/demo/`](https://github.com/agent-browser/agent-browser/tree/main/examples/demo).
+A working demo with a UI and deploy-to-Vercel button is at
+[`examples/environments/`](https://github.com/agent-browser/agent-browser/tree/main/examples/environments).
