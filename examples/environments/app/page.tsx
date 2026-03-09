@@ -479,7 +479,7 @@ export default function Home() {
               )}
             </button>
             <a
-              href="https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fagent-browser%2Fagent-browser%2Ftree%2Fmain%2Fexamples%2Fenvironments&env=AGENT_BROWSER_SNAPSHOT_ID&envDescription=Sandbox%20snapshot%20ID%20for%20fast%20startup.%20Create%20with%20npx%20tsx%20scripts%2Fcreate-snapshot.ts&envLink=https%3A%2F%2Fgithub.com%2Fagent-browser%2Fagent-browser%2Ftree%2Fmain%2Fexamples%2Fenvironments%23sandbox-snapshots&project-name=agent-browser-environments&repository-name=agent-browser-environments"
+              href="https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fagent-browser%2Fagent-browser%2Ftree%2Fmain%2Fexamples%2Fenvironments&project-name=agent-browser-environments&repository-name=agent-browser-environments"
               target="_blank"
               rel="noopener noreferrer"
             >
