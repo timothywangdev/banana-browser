@@ -1,0 +1,194 @@
+import { pageMetadata } from "@/lib/page-metadata"
+
+export const metadata = pageMetadata("next")
+
+# Next.js + Vercel
+
+Two patterns for running agent-browser from Next.js server actions
+deployed on Vercel.
+
+## Pattern 1: Vercel Sandbox
+
+A Linux microVM spins up on demand, runs agent-browser + Chrome, and
+shuts down. No external server. Best for one-off tasks under ~60
+seconds.
+
+```bash
+# Vercel serverless function creates a sandbox, runs commands, returns result
+Sandbox.create() -> runCommand("agent-browser open ...") -> stop()
+```
+
+### Server action
+
+```ts
+"use server";
+import { Sandbox } from "@vercel/sandbox";
+
+export async function screenshotUrl(url: string) {
+  const sandbox = await Sandbox.create({ runtime: "node24" });
+
+  try {
+    await sandbox.runCommand("npm", ["install", "-g", "agent-browser"]);
+    await sandbox.runCommand("npx", ["agent-browser", "install"]);
+    await sandbox.runCommand("agent-browser", ["open", url]);
+
+    const result = await sandbox.runCommand("agent-browser", [
+      "screenshot", "--json",
+    ]);
+    const stdout = await result.stdout();
+    const data = JSON.parse(stdout);
+
+    await sandbox.runCommand("agent-browser", ["close"]);
+    return { ok: true, screenshot: data.data.base64 };
+  } finally {
+    await sandbox.stop();
+  }
+}
+```
+
+### Optimize with snapshots
+
+Installing agent-browser + Chromium takes ~30 seconds. Create a
+snapshot to make sandbox creation sub-second:
+
+```bash
+npx tsx scripts/create-snapshot.ts
+# Output: AGENT_BROWSER_SNAPSHOT_ID=snap_xxxxxxxxxxxx
+```
+
+Then use the snapshot:
+
+```ts
+const sandbox = await Sandbox.create({
+  source: { type: "snapshot", snapshotId: process.env.AGENT_BROWSER_SNAPSHOT_ID },
+  timeout: 120_000,
+});
+
+// agent-browser and Chromium are already installed -- run commands immediately
+await sandbox.runCommand("agent-browser", ["open", url]);
+```
+
+## Pattern 2: External API server
+
+You host agent-browser + Chrome on a server. Your Vercel function
+calls it over HTTP. Best for long-running workflows, persistent
+sessions, or scheduled jobs.
+
+### Architecture
+
+```bash
+Vercel (serverless)         Your server (Docker)
++------------------+        +------------------------+
+| Server action    |  --->  | API server (:3001)     |
+|   fetch()        |        | agent-browser daemon   |
++------------------+        | Chrome (headless)      |
+                            +------------------------+
+```
+
+### Server action
+
+```ts
+"use server";
+
+const API_URL = process.env.AGENT_BROWSER_API_URL;
+
+export async function screenshotUrl(url: string) {
+  const res = await fetch(`${API_URL}/api/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      commands: [
+        { action: "launch", headless: true },
+        { action: "navigate", url, waitUntil: "networkidle" },
+        { action: "screenshot" },
+      ],
+    }),
+  });
+  return res.json();
+}
+```
+
+### Deploy the API server
+
+The example includes a Dockerfile. Deploy it to any container host
+(Railway, Fly.io, Render, etc.):
+
+```bash
+cd examples/next
+docker build -t agent-browser-api .
+docker run -p 3001:3001 agent-browser-api
+```
+
+Set `AGENT_BROWSER_API_URL` in your Vercel project settings to point
+at your deployed server.
+
+## Scheduled workflows (cron)
+
+For recurring tasks like daily price monitoring, use Vercel Cron Jobs:
+
+```ts
+// app/api/cron/monitor/route.ts
+export async function GET() {
+  const res = await fetch(`${process.env.AGENT_BROWSER_API_URL}/api/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      commands: [
+        { action: "launch", headless: true },
+        { action: "navigate", url: "https://example.com/pricing" },
+        { action: "snapshot", interactive: false, compact: true },
+        { action: "close" },
+      ],
+    }),
+  });
+
+  const data = await res.json();
+  // Process results, send alerts, store in database...
+  return Response.json({ ok: true, data });
+}
+```
+
+Add to `vercel.json`:
+
+```json
+{
+  "crons": [
+    { "path": "/api/cron/monitor", "schedule": "0 9 * * *" }
+  ]
+}
+```
+
+## When to use which pattern
+
+<table>
+  <thead>
+    <tr><th></th><th>Vercel Sandbox</th><th>External server</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Infrastructure</td><td>None (Vercel manages it)</td><td>You host a server</td></tr>
+    <tr><td>Startup time</td><td>Sub-second with snapshot</td><td>Always warm</td></tr>
+    <tr><td>Task duration</td><td>Up to ~2 minutes</td><td>No limit</td></tr>
+    <tr><td>Persistent sessions</td><td>No (ephemeral)</td><td>Yes</td></tr>
+    <tr><td>Cost model</td><td>Per-use (active CPU)</td><td>Always-on server</td></tr>
+    <tr><td>Best for</td><td>One-off screenshots, scrapes</td><td>Long workflows, cron jobs</td></tr>
+  </tbody>
+</table>
+
+## Environment variables
+
+<table>
+  <thead>
+    <tr><th>Variable</th><th>Pattern</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>AGENT_BROWSER_SNAPSHOT_ID</code></td><td>Sandbox</td><td>Pre-built snapshot for fast startup</td></tr>
+    <tr><td><code>AGENT_BROWSER_API_URL</code></td><td>External</td><td>URL of your API server</td></tr>
+    <tr><td><code>AGENT_BROWSER_API_SECRET</code></td><td>External</td><td>Shared auth secret (optional)</td></tr>
+  </tbody>
+</table>
+
+## Example project
+
+A full working example is at
+[`examples/next/`](https://github.com/vercel-labs/agent-browser/tree/main/examples/next)
+with both patterns, a demo UI, and deployment configs.
