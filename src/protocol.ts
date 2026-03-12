@@ -1149,8 +1149,12 @@ export function errorResponse(id: string, error: string): Response {
 }
 
 /**
- * Serialize a response to JSON string
+ * Serialize a response to JSON string.
+ * Replaces lone Unicode surrogates with U+FFFD to prevent
+ * serde_json parsing errors on the Rust side.
  */
 export function serializeResponse(response: Response): string {
-  return JSON.stringify(response);
+  return JSON.stringify(response, (_key, value) =>
+    typeof value === 'string' && !value.isWellFormed() ? value.toWellFormed() : value
+  );
 }
