@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { exec } from 'node:child_process';
 import type { Page, Frame } from 'playwright-core';
 import { mkdirSync } from 'node:fs';
 import type { BrowserManager, ScreencastFrame } from './browser.js';
@@ -431,6 +432,10 @@ async function dispatchAction(command: Command, browser: BrowserManager): Promis
       return await handleReload(command, browser);
     case 'url':
       return await handleUrl(command, browser);
+    case 'cdp_url':
+      return handleCdpUrl(command, browser);
+    case 'inspect':
+      return await handleInspect(command, browser);
     case 'title':
       return await handleTitle(command, browser);
     case 'getattribute':
@@ -1575,6 +1580,73 @@ async function handleUrl(
 ): Promise<Response> {
   const page = browser.getPage();
   return successResponse(command.id, { url: page.url() });
+}
+
+function handleCdpUrl(command: Command & { action: 'cdp_url' }, browser: BrowserManager): Response {
+  const cdpUrl = browser.getCdpUrl();
+  if (!cdpUrl) {
+    return errorResponse(command.id, 'CDP URL not available (browser may not be launched)');
+  }
+  return successResponse(command.id, { cdpUrl });
+}
+
+async function handleInspect(
+  command: Command & { action: 'inspect' },
+  browser: BrowserManager
+): Promise<Response> {
+  const cdpUrl = browser.getCdpUrl();
+  if (!cdpUrl) {
+    return errorResponse(command.id, 'CDP URL not available (browser may not be launched)');
+  }
+
+  // Shut down any existing inspect server so we always target the current page
+  browser.stopInspectServer();
+
+  const stripped = cdpUrl.replace(/^(wss?|https?):\/\//, '');
+  const hostPort = stripped.split('/')[0];
+
+  // Get the target ID so the inspect server can create its own dedicated CDP session
+  const page = browser.getPage();
+  const context = page.context();
+  const tmpCdp = await context.newCDPSession(page);
+  let targetId = '';
+  try {
+    const info: any = await tmpCdp.send('Target.getTargetInfo' as any);
+    targetId = info?.targetInfo?.targetId || '';
+  } catch (err) {
+    console.error('[inspect] getTargetInfo failed:', err);
+  }
+  await tmpCdp.detach();
+
+  if (!targetId) {
+    return errorResponse(command.id, 'Could not determine target ID for active page');
+  }
+
+  const { InspectServer } = await import('./inspect-server.js');
+  const server = new InspectServer({
+    chromeHostPort: hostPort,
+    targetId,
+    chromeWsUrl: cdpUrl,
+  });
+  await server.start();
+  browser.setInspectServer(server);
+
+  const url = `http://127.0.0.1:${server.port}`;
+  openUrlInBrowser(url);
+  return successResponse(command.id, { opened: true, url });
+}
+
+function openUrlInBrowser(url: string): void {
+  const platform = process.platform;
+  const cmd =
+    platform === 'darwin'
+      ? `open "${url}"`
+      : platform === 'win32'
+        ? `start "" "${url}"`
+        : `xdg-open "${url}"`;
+  exec(cmd, (err) => {
+    if (err) console.error('[inspect] Failed to open browser:', err.message);
+  });
 }
 
 async function handleTitle(

@@ -19,6 +19,7 @@ import os from 'node:os';
 import { existsSync, mkdirSync, rmSync, readFileSync, statSync } from 'node:fs';
 import { writeFile, mkdir } from 'node:fs/promises';
 import type { LaunchCommand, TraceEvent } from './types.js';
+import type { InspectServer } from './inspect-server.js';
 import { type RefMap, type EnhancedSnapshot, getEnhancedSnapshot, parseRef } from './snapshot.js';
 import { safeHeaderMerge } from './state-utils.js';
 import { isDomainAllowed, installDomainFilter, parseDomainList } from './domain-filter.js';
@@ -96,6 +97,7 @@ interface PageError {
 export class BrowserManager {
   private browser: Browser | null = null;
   private cdpEndpoint: string | null = null; // stores port number or full URL
+  private resolvedWsUrl: string | null = null;
   private isPersistentContext: boolean = false;
   private browserbaseSessionId: string | null = null;
   private browserbaseApiKey: string | null = null;
@@ -119,6 +121,19 @@ export class BrowserManager {
   private colorScheme: 'light' | 'dark' | 'no-preference' | null = null;
   private downloadPath: string | null = null;
   private allowedDomains: string[] = [];
+  private inspectServer: InspectServer | null = null;
+
+  stopInspectServer(): void {
+    if (this.inspectServer) {
+      this.inspectServer.stop();
+      this.inspectServer = null;
+    }
+  }
+
+  setInspectServer(server: InspectServer): void {
+    this.stopInspectServer();
+    this.inspectServer = server;
+  }
 
   /**
    * Set the persistent color scheme preference.
@@ -165,6 +180,18 @@ export class BrowserManager {
    */
   isLaunched(): boolean {
     return this.browser !== null || this.isPersistentContext;
+  }
+
+  getCdpUrl(): string | null {
+    if (this.resolvedWsUrl) return this.resolvedWsUrl;
+    if (this.cdpEndpoint?.startsWith('ws://') || this.cdpEndpoint?.startsWith('wss://')) {
+      return this.cdpEndpoint;
+    }
+    try {
+      return (this.browser as any)?.wsEndpoint?.() ?? null;
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -1402,6 +1429,7 @@ export class BrowserManager {
         ...(this.downloadPath && { downloadsPath: this.downloadPath }),
       });
       this.cdpEndpoint = null;
+      this.resolvedWsUrl = null;
 
       // Check for auto-load state file (supports encrypted files)
       let storageState:
@@ -1556,6 +1584,23 @@ export class BrowserManager {
       // All validation passed - commit state
       this.browser = browser;
       this.cdpEndpoint = cdpEndpoint;
+
+      let resolvedWs: string | null = null;
+      try {
+        resolvedWs = (browser as any).wsEndpoint?.() ?? null;
+      } catch (err) {
+        console.error('[inspect] wsEndpoint() failed:', err);
+      }
+      if (!resolvedWs && (cdpUrl.startsWith('http://') || cdpUrl.startsWith('https://'))) {
+        try {
+          const resp = await fetch(`${cdpUrl}/json/version`);
+          const info: any = await resp.json();
+          resolvedWs = info.webSocketDebuggerUrl ?? null;
+        } catch (err) {
+          console.error('[inspect] /json/version fetch failed:', err);
+        }
+      }
+      this.resolvedWsUrl = resolvedWs;
 
       for (const context of contexts) {
         context.setDefaultTimeout(getDefaultTimeout());
@@ -2471,6 +2516,8 @@ export class BrowserManager {
    * Close the browser and clean up
    */
   async close(): Promise<void> {
+    this.stopInspectServer();
+
     // Stop recording if active (saves video)
     if (this.recordingContext) {
       await this.stopRecording();
@@ -2551,6 +2598,7 @@ export class BrowserManager {
     this.pages = [];
     this.contexts = [];
     this.cdpEndpoint = null;
+    this.resolvedWsUrl = null;
     this.browserbaseSessionId = null;
     this.browserbaseApiKey = null;
     this.browserUseSessionId = null;

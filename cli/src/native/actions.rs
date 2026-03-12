@@ -12,6 +12,7 @@ use super::cdp::types::{
 use super::cookies;
 use super::diff;
 use super::element::RefMap;
+use super::inspect_server::InspectServer;
 use super::interaction;
 use super::network::{self, DomainFilter, EventTracker};
 use super::policy::{ActionPolicy, ConfirmActions, PolicyResult};
@@ -96,6 +97,7 @@ pub struct DaemonState {
     pub har_recording: bool,
     pub har_entries: Vec<HarEntry>,
     pub confirm_actions: Option<ConfirmActions>,
+    pub inspect_server: Option<InspectServer>,
     pub routes: Vec<RouteEntry>,
     pub tracked_requests: Vec<TrackedRequest>,
     pub request_tracking: bool,
@@ -127,6 +129,7 @@ impl DaemonState {
             har_recording: false,
             har_entries: Vec::new(),
             confirm_actions: ConfirmActions::from_env(),
+            inspect_server: None,
             routes: Vec::new(),
             tracked_requests: Vec::new(),
             request_tracking: false,
@@ -567,6 +570,8 @@ pub async fn execute_command(cmd: &Value, state: &mut DaemonState) -> Value {
         "launch" => handle_launch(cmd, state).await,
         "navigate" => handle_navigate(cmd, state).await,
         "url" => handle_url(state).await,
+        "cdp_url" => handle_cdp_url(state),
+        "inspect" => handle_inspect(state).await,
         "title" => handle_title(state).await,
         "content" => handle_content(state).await,
         "evaluate" => handle_evaluate(cmd, state).await,
@@ -1170,6 +1175,50 @@ async fn handle_url(state: &DaemonState) -> Result<Value, String> {
     Ok(json!({ "url": url }))
 }
 
+fn handle_cdp_url(state: &DaemonState) -> Result<Value, String> {
+    let mgr = state.browser.as_ref().ok_or("Browser not launched")?;
+    Ok(json!({ "cdpUrl": mgr.get_cdp_url() }))
+}
+
+async fn handle_inspect(state: &mut DaemonState) -> Result<Value, String> {
+    let mgr = state.browser.as_ref().ok_or("Browser not launched")?;
+
+    // Shut down any existing inspect server so we always target the current page
+    if let Some(server) = state.inspect_server.take() {
+        server.shutdown();
+    }
+
+    let target_id = mgr.active_target_id()?.to_string();
+    let chrome_hp = mgr.chrome_host_port().to_string();
+    let proxy_handle = mgr.client.inspect_handle();
+
+    let server = InspectServer::start(proxy_handle, target_id, chrome_hp).await?;
+    let url = format!("http://127.0.0.1:{}", server.port());
+    open_url_in_browser(&url);
+
+    state.inspect_server = Some(server);
+    Ok(json!({ "opened": true, "url": url }))
+}
+
+fn open_url_in_browser(url: &str) {
+    #[cfg(target_os = "macos")]
+    let result = std::process::Command::new("open").arg(url).spawn();
+    #[cfg(target_os = "linux")]
+    let result = std::process::Command::new("xdg-open").arg(url).spawn();
+    #[cfg(target_os = "windows")]
+    let result = std::process::Command::new("cmd")
+        .args(["/c", "start", "", url])
+        .spawn();
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    let result: Result<std::process::Child, std::io::Error> = Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "unsupported platform",
+    ));
+    if let Err(e) = result {
+        eprintln!("[inspect] Failed to open browser: {}", e);
+    }
+}
+
 async fn handle_title(state: &DaemonState) -> Result<Value, String> {
     if let Some(ref wb) = state.webdriver_backend {
         if state.browser.is_none() {
@@ -1253,6 +1302,10 @@ async fn handle_close(state: &mut DaemonState) -> Result<Value, String> {
     }
     state.safari_driver = None;
     state.backend_type = BackendType::Cdp;
+
+    if let Some(server) = state.inspect_server.take() {
+        server.shutdown();
+    }
 
     state.ref_map.clear();
     Ok(json!({ "closed": true }))
