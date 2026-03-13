@@ -5,8 +5,8 @@ use tokio::sync::{broadcast, RwLock};
 
 use super::auth;
 use super::browser::{BrowserManager, WaitUntil};
-use super::cdp::client::CdpClient;
 use super::cdp::chrome::LaunchOptions;
+use super::cdp::client::CdpClient;
 use super::cdp::types::{
     AttachToTargetParams, AttachToTargetResult, CdpEvent, ConsoleApiCalledEvent,
     CreateTargetResult, ExceptionThrownEvent, TargetCreatedEvent, TargetDestroyedEvent,
@@ -1496,10 +1496,7 @@ async fn handle_click(cmd: &Value, state: &mut DaemonState) -> Result<Value, Str
     let mgr = state.browser.as_ref().ok_or("Browser not launched")?;
     let session_id = mgr.active_session_id()?.to_string();
 
-    let new_tab = cmd
-        .get("newTab")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    let new_tab = cmd.get("newTab").and_then(|v| v.as_bool()).unwrap_or(false);
 
     if new_tab {
         use super::element::resolve_element_object_id;
@@ -1512,7 +1509,11 @@ async fn handle_click(cmd: &Value, state: &mut DaemonState) -> Result<Value, Str
         });
         let call_result = mgr
             .client
-            .send_command("Runtime.callFunctionOn", Some(call_params), Some(&session_id))
+            .send_command(
+                "Runtime.callFunctionOn",
+                Some(call_params),
+                Some(&session_id),
+            )
             .await?;
         let href = call_result
             .get("result")

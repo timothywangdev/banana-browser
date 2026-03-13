@@ -27,7 +27,6 @@ use output::{
     print_command_help, print_help, print_response_with_opts, print_version, OutputOptions,
 };
 
-
 fn serialize_json_value(value: &serde_json::Value) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| {
         r#"{"success":false,"error":"Failed to serialize JSON response"}"#.to_string()
@@ -52,7 +51,6 @@ fn print_json_error_with_type(message: impl AsRef<str>, error_type: &str) {
         "type": error_type,
     }));
 }
-
 
 fn parse_proxy(proxy_str: &str) -> serde_json::Value {
     let Some(protocol_end) = proxy_str.find("://") else {

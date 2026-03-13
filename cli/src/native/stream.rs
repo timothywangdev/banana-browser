@@ -87,13 +87,7 @@ impl StreamServer {
     pub async fn start_without_client(
         preferred_port: u16,
         session_id: String,
-    ) -> Result<
-        (
-            Self,
-            Arc<RwLock<Option<Arc<CdpClient>>>>,
-        ),
-        String,
-    > {
+    ) -> Result<(Self, Arc<RwLock<Option<Arc<CdpClient>>>>), String> {
         let addr = format!("127.0.0.1:{}", preferred_port);
         let listener = TcpListener::bind(&addr)
             .await

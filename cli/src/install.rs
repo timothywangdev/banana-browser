@@ -46,7 +46,8 @@ pub fn find_installed_chrome() -> Option<PathBuf> {
 fn chrome_binary_in_dir(dir: &Path) -> Option<PathBuf> {
     #[cfg(target_os = "macos")]
     {
-        let app = dir.join("Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing");
+        let app =
+            dir.join("Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing");
         if app.exists() {
             return Some(app);
         }
@@ -54,7 +55,9 @@ fn chrome_binary_in_dir(dir: &Path) -> Option<PathBuf> {
         if inner.exists() {
             return Some(inner);
         }
-        let inner_x64 = dir.join("chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing");
+        let inner_x64 = dir.join(
+            "chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+        );
         if inner_x64.exists() {
             return Some(inner_x64);
         }
