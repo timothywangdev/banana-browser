@@ -234,7 +234,11 @@ fn download_and_extract(url: &str, dest: &Path) -> Result<(), String> {
             .by_index(i)
             .map_err(|e| format!("Failed to read zip entry: {}", e))?;
 
-        let raw_name = file.name().to_string();
+        let enclosed = match file.enclosed_name() {
+            Some(name) => name.to_owned(),
+            None => continue,
+        };
+        let raw_name = enclosed.to_string_lossy().to_string();
         let rel_path = raw_name
             .strip_prefix("chrome-")
             .and_then(|s| s.split_once('/'))
@@ -246,6 +250,11 @@ fn download_and_extract(url: &str, dest: &Path) -> Result<(), String> {
         }
 
         let out_path = dest.join(&rel_path);
+
+        // Defense-in-depth: ensure the resolved path is inside dest
+        if !out_path.starts_with(dest) {
+            continue;
+        }
 
         if file.is_dir() {
             fs::create_dir_all(&out_path)
