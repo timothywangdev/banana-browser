@@ -6,6 +6,8 @@ allowed-tools: Bash(npx agent-browser:*), Bash(agent-browser:*)
 
 # Browser Automation with agent-browser
 
+The CLI uses Chrome/Chromium via CDP directly. Run `agent-browser install` to download Chrome.
+
 ## Core Workflow
 
 Every browser automation follows this pattern:
@@ -441,7 +443,7 @@ agent-browser diff url https://staging.example.com https://prod.example.com --sc
 
 ## Timeouts and Slow Pages
 
-The default Playwright timeout is 25 seconds for local browsers. This can be overridden with the `AGENT_BROWSER_DEFAULT_TIMEOUT` environment variable (value in milliseconds). For slow websites or large pages, use explicit waits instead of relying on the default timeout:
+The default timeout is 25 seconds. This can be overridden with the `AGENT_BROWSER_DEFAULT_TIMEOUT` environment variable (value in milliseconds). For slow websites or large pages, use explicit waits instead of relying on the default timeout:
 
 ```bash
 # Wait for network activity to settle (best for slow pages)
@@ -502,8 +504,6 @@ agent-browser click @e1              # Use new refs
 ## Annotated Screenshots (Vision Mode)
 
 Use `--annotate` to take a screenshot with numbered labels overlaid on interactive elements. Each label `[N]` maps to ref `@eN`. This also caches refs, so you can interact with elements immediately without a separate snapshot.
-
-In native mode, this currently works on the CDP-backed browser path (Chromium/Lightpanda). The Safari/WebDriver backend does not yet support `--annotate`.
 
 ```bash
 agent-browser screenshot --annotate
@@ -588,21 +588,6 @@ Priority (lowest to highest): `~/.agent-browser/config.json` < `./agent-browser.
 | [references/video-recording.md](references/video-recording.md)       | Recording workflows for debugging and documentation       |
 | [references/profiling.md](references/profiling.md)                   | Chrome DevTools profiling for performance analysis        |
 | [references/proxy-support.md](references/proxy-support.md)           | Proxy configuration, geo-testing, rotating proxies        |
-
-## Experimental: Native Mode
-
-agent-browser has an experimental native Rust daemon that communicates with Chrome directly via CDP, bypassing Node.js and Playwright entirely. It is opt-in and not recommended for production use yet.
-
-```bash
-# Enable via flag
-agent-browser --native open example.com
-
-# Enable via environment variable (avoids passing --native every time)
-export AGENT_BROWSER_NATIVE=1
-agent-browser open example.com
-```
-
-The native daemon supports Chromium and Safari (via WebDriver). Firefox and WebKit are not yet supported. All core commands (navigate, snapshot, click, fill, screenshot, cookies, storage, tabs, eval, etc.) work identically in native mode. Use `agent-browser close` before switching between native and default mode within the same session.
 
 ## Browser Engine Selection
 
