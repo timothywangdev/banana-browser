@@ -2110,7 +2110,7 @@ async function handleWheel(command: WheelCommand, browser: BrowserManager): Prom
   const page = browser.getPage();
 
   if (command.selector) {
-    const element = page.locator(command.selector);
+    const element = browser.getLocator(command.selector);
     await element.hover();
   }
 
@@ -2149,14 +2149,14 @@ async function handleHighlight(
   command: HighlightCommand,
   browser: BrowserManager
 ): Promise<Response> {
-  const page = browser.getPage();
-  await page.locator(command.selector).highlight();
+  const locator = browser.getLocator(command.selector);
+  await locator.highlight();
   return successResponse(command.id, { highlighted: true });
 }
 
 async function handleClear(command: ClearCommand, browser: BrowserManager): Promise<Response> {
-  const page = browser.getPage();
-  await page.locator(command.selector).clear();
+  const locator = browser.getLocator(command.selector);
+  await locator.clear();
   return successResponse(command.id, { cleared: true });
 }
 
@@ -2164,8 +2164,8 @@ async function handleSelectAll(
   command: SelectAllCommand,
   browser: BrowserManager
 ): Promise<Response> {
-  const page = browser.getPage();
-  await page.locator(command.selector).selectText();
+  const locator = browser.getLocator(command.selector);
+  await locator.selectText();
   return successResponse(command.id, { selected: true });
 }
 
@@ -2211,8 +2211,8 @@ async function handleDispatch(
   command: DispatchEventCommand,
   browser: BrowserManager
 ): Promise<Response> {
-  const page = browser.getPage();
-  await page.locator(command.selector).dispatchEvent(command.event, command.eventInit);
+  const locator = browser.getLocator(command.selector);
+  await locator.dispatchEvent(command.event, command.eventInit);
   return successResponse(command.id, { dispatched: command.event });
 }
 
@@ -2362,8 +2362,7 @@ async function handleGetByTestId(
 }
 
 async function handleNth(command: NthCommand, browser: BrowserManager): Promise<Response> {
-  const page = browser.getPage();
-  const base = page.locator(command.selector);
+  const base = browser.getLocator(command.selector);
   const locator = command.index === -1 ? base.last() : base.nth(command.index);
 
   switch (command.subaction) {
@@ -2530,8 +2529,8 @@ async function handleMultiSelect(
   command: MultiSelectCommand,
   browser: BrowserManager
 ): Promise<Response> {
-  const page = browser.getPage();
-  const selected = await page.locator(command.selector).selectOption(command.values);
+  const locator = browser.getLocator(command.selector);
+  const selected = await locator.selectOption(command.values);
   return successResponse(command.id, { selected });
 }
 
@@ -2740,7 +2739,7 @@ async function handleDiffScreenshot(
   const page = browser.getPage();
   let screenshotBuffer: Buffer;
   if (command.selector) {
-    const locator = browser.getLocatorFromRef(command.selector) || page.locator(command.selector);
+    const locator = browser.getLocator(command.selector);
     screenshotBuffer = await locator.screenshot({ type: 'png' });
   } else {
     screenshotBuffer = await page.screenshot({ fullPage: command.fullPage, type: 'png' });
