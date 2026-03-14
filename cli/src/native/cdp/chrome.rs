@@ -123,6 +123,13 @@ fn build_chrome_args(options: &LaunchOptions) -> Result<ChromeArgs, String> {
         "--use-mock-keychain".to_string(),
     ];
 
+    // Add stealth flags when using Patchright browser for anti-detection
+    if let Ok(path) = std::env::var("PATCHRIGHT_BROWSER_EXECUTABLE") {
+        if PathBuf::from(&path).exists() {
+            args.push("--disable-blink-features=AutomationControlled".to_string());
+        }
+    }
+
     let has_extensions = options
         .extensions
         .as_ref()
@@ -354,6 +361,14 @@ fn chrome_launch_error(message: &str, stderr_lines: &[String]) -> String {
 }
 
 pub fn find_chrome() -> Option<PathBuf> {
+    // 0. Check PATCHRIGHT_BROWSER_EXECUTABLE environment variable first
+    if let Ok(path) = std::env::var("PATCHRIGHT_BROWSER_EXECUTABLE") {
+        let p = PathBuf::from(&path);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+
     // 1. Check Chrome downloaded by `agent-browser install`
     if let Some(p) = crate::install::find_installed_chrome() {
         return Some(p);
