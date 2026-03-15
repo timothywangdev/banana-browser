@@ -27,6 +27,7 @@ use super::state;
 use super::storage;
 use super::stream;
 use super::tracing::{self as native_tracing, TracingState};
+use super::adapter::PatchrightAdapter;
 use super::webdriver::appium::AppiumManager;
 use super::webdriver::backend::{BrowserBackend, WebDriverBackend, WEBDRIVER_UNSUPPORTED_ACTIONS};
 use super::webdriver::ios;
@@ -78,6 +79,7 @@ pub struct FetchPausedRequest {
 pub enum BackendType {
     Cdp,
     WebDriver,
+    Patchright,
 }
 
 pub struct DaemonState {
@@ -85,6 +87,7 @@ pub struct DaemonState {
     pub appium: Option<AppiumManager>,
     pub safari_driver: Option<safari::SafariDriverProcess>,
     pub webdriver_backend: Option<super::webdriver::backend::WebDriverBackend>,
+    pub patchright: Option<PatchrightAdapter>,
     pub backend_type: BackendType,
     pub ref_map: RefMap,
     pub domain_filter: Option<DomainFilter>,
@@ -116,6 +119,7 @@ impl DaemonState {
             appium: None,
             safari_driver: None,
             webdriver_backend: None,
+            patchright: None,
             backend_type: BackendType::Cdp,
             ref_map: RefMap::new(),
             domain_filter: env::var("AGENT_BROWSER_ALLOWED_DOMAINS")
@@ -551,10 +555,22 @@ pub async fn execute_command(cmd: &Value, state: &mut DaemonState) -> Value {
     );
     if !skip_launch {
         // Check if existing connection is stale and needs re-launch
-        let needs_launch = if let Some(ref mgr) = state.browser {
-            !mgr.is_connection_alive().await
-        } else {
-            true
+        let needs_launch = match state.backend_type {
+            BackendType::Patchright => {
+                // For Patchright, check if adapter is alive
+                if let Some(ref adapter) = state.patchright {
+                    !adapter.is_alive().await
+                } else {
+                    true
+                }
+            }
+            _ => {
+                if let Some(ref mgr) = state.browser {
+                    !mgr.is_connection_alive().await
+                } else {
+                    true
+                }
+            }
         };
 
         if needs_launch {
@@ -564,6 +580,12 @@ pub async fn execute_command(cmd: &Value, state: &mut DaemonState) -> Value {
                 }
                 state.browser = None;
                 state.update_stream_client().await;
+            }
+            if state.patchright.is_some() {
+                if let Some(ref adapter) = state.patchright {
+                    let _ = super::adapter::cleanup_adapter(adapter).await;
+                }
+                state.patchright = None;
             }
             if let Err(e) = auto_launch(state).await {
                 return error_response(&id, &format!("Auto-launch failed: {}", e));
@@ -758,6 +780,25 @@ pub async fn execute_command(cmd: &Value, state: &mut DaemonState) -> Value {
 async fn auto_launch(state: &mut DaemonState) -> Result<(), String> {
     let options = launch_options_from_env();
     let engine = env::var("AGENT_BROWSER_ENGINE").ok();
+
+    // Handle Patchright engine
+    if engine.as_deref() == Some("patchright") {
+        let headless = !env::var("AGENT_BROWSER_HEADED")
+            .map(|v| v == "1" || v == "true")
+            .unwrap_or(false);
+        let args: Option<Vec<String>> = env::var("AGENT_BROWSER_ARGS").ok().map(|v| {
+            v.split([',', '\n'])
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        });
+
+        let adapter = PatchrightAdapter::spawn().await?;
+        adapter.launch(headless, args).await?;
+        state.patchright = Some(adapter);
+        state.backend_type = BackendType::Patchright;
+        return Ok(());
+    }
 
     if let Ok(cdp) = env::var("AGENT_BROWSER_CDP") {
         let mgr = BrowserManager::connect_cdp(&cdp).await?;
@@ -974,6 +1015,11 @@ async fn handle_launch(cmd: &Value, state: &mut DaemonState) -> Result<Value, St
         .map(String::from)
         .or_else(|| env::var("AGENT_BROWSER_ENGINE").ok());
 
+    // Handle Patchright engine separately - it uses a different backend
+    if engine.as_deref() == Some("patchright") {
+        return launch_patchright(cmd, state).await;
+    }
+
     let options = LaunchOptions {
         headless,
         executable_path: cmd
@@ -1057,6 +1103,45 @@ async fn handle_launch(cmd: &Value, state: &mut DaemonState) -> Result<Value, St
     }
 
     Ok(json!({ "launched": true }))
+}
+
+async fn launch_patchright(cmd: &Value, state: &mut DaemonState) -> Result<Value, String> {
+    // Close any existing browser/adapter
+    if let Some(ref mut b) = state.browser {
+        let _ = b.close().await;
+        state.browser = None;
+    }
+    if let Some(ref adapter) = state.patchright {
+        let _ = super::adapter::cleanup_adapter(adapter).await;
+    }
+    state.patchright = None;
+    state.ref_map.clear();
+
+    let headless = cmd
+        .get("headless")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+
+    let args: Option<Vec<String>> = cmd.get("args").and_then(|v| v.as_array()).map(|arr| {
+        arr.iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect()
+    });
+
+    // Spawn the Patchright adapter
+    let adapter = PatchrightAdapter::spawn().await?;
+
+    // Launch browser through the adapter
+    let result = adapter.launch(headless, args).await?;
+
+    state.patchright = Some(adapter);
+    state.backend_type = BackendType::Patchright;
+
+    Ok(json!({
+        "launched": true,
+        "engine": "patchright",
+        "sessionId": result.session_id,
+    }))
 }
 
 async fn launch_ios(cmd: &Value, state: &mut DaemonState) -> Result<Value, String> {
@@ -1148,6 +1233,14 @@ async fn handle_navigate(cmd: &Value, state: &mut DaemonState) -> Result<Value, 
 
     if let Some(ref filter) = state.domain_filter {
         filter.check_url(url)?;
+    }
+
+    // Patchright backend path
+    if let Some(ref adapter) = state.patchright {
+        state.ref_map.clear();
+        let wait_until = cmd.get("waitUntil").and_then(|v| v.as_str());
+        let result = adapter.navigate(url, wait_until).await?;
+        return Ok(json!({ "url": result.url, "title": result.title }));
     }
 
     // WebDriver backend path
@@ -1279,22 +1372,29 @@ async fn handle_content(state: &DaemonState) -> Result<Value, String> {
 }
 
 async fn handle_evaluate(cmd: &Value, state: &DaemonState) -> Result<Value, String> {
+    let script = cmd
+        .get("script")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing 'script' parameter")?;
+
+    // Patchright backend path
+    if let Some(ref adapter) = state.patchright {
+        let result = adapter.evaluate(script).await?;
+        let url = adapter.evaluate("location.href").await
+            .ok()
+            .and_then(|v| v.as_str().map(String::from))
+            .unwrap_or_default();
+        return Ok(json!({ "result": result, "origin": url }));
+    }
+
     if let Some(ref wb) = state.webdriver_backend {
         if state.browser.is_none() {
-            let script = cmd
-                .get("script")
-                .and_then(|v| v.as_str())
-                .ok_or("Missing 'script' parameter")?;
             let result = wb.evaluate(script).await?;
             let url = wb.get_url().await.unwrap_or_default();
             return Ok(json!({ "result": result, "origin": url }));
         }
     }
     let mgr = state.browser.as_ref().ok_or("Browser not launched")?;
-    let script = cmd
-        .get("script")
-        .and_then(|v| v.as_str())
-        .ok_or("Missing 'script' parameter")?;
 
     let result = mgr.evaluate(script, None).await?;
     let url = mgr.get_url().await.unwrap_or_default();
@@ -1302,6 +1402,13 @@ async fn handle_evaluate(cmd: &Value, state: &DaemonState) -> Result<Value, Stri
 }
 
 async fn handle_close(state: &mut DaemonState) -> Result<Value, String> {
+    // Close Patchright adapter if active
+    if let Some(ref adapter) = state.patchright {
+        let _ = adapter.close().await;
+        let _ = super::adapter::cleanup_adapter(adapter).await;
+    }
+    state.patchright = None;
+
     if let Some(ref mgr) = state.browser {
         if let Some(ref session_name) = state.session_name {
             if let Ok(session_id) = mgr.active_session_id() {
@@ -1350,6 +1457,50 @@ async fn handle_close(state: &mut DaemonState) -> Result<Value, String> {
 // ---------------------------------------------------------------------------
 
 async fn handle_snapshot(cmd: &Value, state: &mut DaemonState) -> Result<Value, String> {
+    // Patchright backend path
+    if let Some(ref adapter) = state.patchright {
+        let interesting_only = cmd
+            .get("interactive")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+
+        state.ref_map.clear();
+        let result = adapter.snapshot(interesting_only).await?;
+
+        // Store refs in ref_map for later use
+        for (ref_id, elem_ref) in &result.refs {
+            // For Patchright, we store the ref as a special selector that the adapter understands
+            let selector = format!("@{}", ref_id.trim_start_matches('e'));
+            state.ref_map.insert_with_ref(
+                ref_id.clone(),
+                super::element::RefEntry {
+                    backend_node_id: None,
+                    selector: Some(selector),
+                    role: elem_ref.role.clone(),
+                    name: elem_ref.name.clone(),
+                    nth: None,
+                },
+            );
+        }
+
+        let url = adapter.evaluate("location.href").await
+            .ok()
+            .and_then(|v| v.as_str().map(String::from))
+            .unwrap_or_default();
+
+        let refs: serde_json::Map<String, Value> = result.refs
+            .into_iter()
+            .map(|(ref_id, elem_ref)| {
+                let mut obj = serde_json::Map::new();
+                obj.insert("role".into(), Value::String(elem_ref.role));
+                obj.insert("name".into(), Value::String(elem_ref.name));
+                (ref_id, Value::Object(obj))
+            })
+            .collect();
+
+        return Ok(json!({ "snapshot": result.tree, "origin": url, "refs": refs }));
+    }
+
     let mgr = state.browser.as_ref().ok_or("Browser not launched")?;
     let session_id = mgr.active_session_id()?.to_string();
 
@@ -1399,6 +1550,44 @@ async fn handle_screenshot(cmd: &Value, state: &mut DaemonState) -> Result<Value
         .get("annotate")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+
+    // Patchright backend path
+    if let Some(ref adapter) = state.patchright {
+        if annotate {
+            return Err(
+                "Annotated screenshots are not yet implemented on the Patchright backend"
+                    .to_string(),
+            );
+        }
+
+        let path = cmd.get("path").and_then(|v| v.as_str());
+        let full_page = cmd
+            .get("fullPage")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let result = adapter.screenshot(path, full_page).await?;
+
+        if let Some(p) = result.path {
+            return Ok(json!({ "path": p }));
+        }
+        if let Some(base64_data) = result.base64 {
+            let tmp = format!(
+                "/tmp/screenshot-{}.png",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis())
+                    .unwrap_or(0)
+            );
+            let bytes =
+                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &base64_data)
+                    .map_err(|e| format!("Base64 decode error: {}", e))?;
+            std::fs::write(&tmp, bytes)
+                .map_err(|e| format!("Failed to write screenshot: {}", e))?;
+            return Ok(json!({ "path": tmp }));
+        }
+        return Err("Screenshot failed: no path or base64 data returned".to_string());
+    }
 
     if let Some(ref wb) = state.webdriver_backend {
         if state.browser.is_none() {
@@ -1499,6 +1688,18 @@ async fn handle_click(cmd: &Value, state: &mut DaemonState) -> Result<Value, Str
         .get("selector")
         .and_then(|v| v.as_str())
         .ok_or("Missing 'selector' parameter")?;
+
+    // Patchright backend path
+    if let Some(ref adapter) = state.patchright {
+        // Convert @ref notation to stored selector if needed
+        let actual_selector = if selector.starts_with('@') {
+            state.ref_map.get_selector(selector).unwrap_or(selector)
+        } else {
+            selector
+        };
+        adapter.click(actual_selector).await?;
+        return Ok(json!({ "clicked": selector }));
+    }
 
     if let Some(ref wb) = state.webdriver_backend {
         if state.browser.is_none() {
@@ -1601,6 +1802,17 @@ async fn handle_fill(cmd: &Value, state: &mut DaemonState) -> Result<Value, Stri
             .to_string()
     };
 
+    // Patchright backend path
+    if let Some(ref adapter) = state.patchright {
+        let actual_selector = if selector.starts_with('@') {
+            state.ref_map.get_selector(selector).unwrap_or(selector)
+        } else {
+            selector
+        };
+        adapter.fill(actual_selector, &value).await?;
+        return Ok(json!({ "filled": selector }));
+    }
+
     if let Some(ref wb) = state.webdriver_backend {
         if state.browser.is_none() {
             wb.fill(selector, &value).await?;
@@ -1616,8 +1828,6 @@ async fn handle_fill(cmd: &Value, state: &mut DaemonState) -> Result<Value, Stri
 }
 
 async fn handle_type(cmd: &Value, state: &mut DaemonState) -> Result<Value, String> {
-    let mgr = state.browser.as_ref().ok_or("Browser not launched")?;
-    let session_id = mgr.active_session_id()?.to_string();
     let selector = cmd
         .get("selector")
         .and_then(|v| v.as_str())
@@ -1626,8 +1836,22 @@ async fn handle_type(cmd: &Value, state: &mut DaemonState) -> Result<Value, Stri
         .get("text")
         .and_then(|v| v.as_str())
         .ok_or("Missing 'text' parameter")?;
-    let clear = cmd.get("clear").and_then(|v| v.as_bool()).unwrap_or(false);
     let delay = cmd.get("delay").and_then(|v| v.as_u64());
+
+    // Patchright backend path
+    if let Some(ref adapter) = state.patchright {
+        let actual_selector = if selector.starts_with('@') {
+            state.ref_map.get_selector(selector).unwrap_or(selector)
+        } else {
+            selector
+        };
+        adapter.type_text(actual_selector, text, delay.map(|d| d as u32)).await?;
+        return Ok(json!({ "typed": text }));
+    }
+
+    let mgr = state.browser.as_ref().ok_or("Browser not launched")?;
+    let session_id = mgr.active_session_id()?.to_string();
+    let clear = cmd.get("clear").and_then(|v| v.as_bool()).unwrap_or(false);
 
     interaction::type_text(
         &mgr.client,

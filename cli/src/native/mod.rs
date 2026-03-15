@@ -1,6 +1,8 @@
 #[allow(dead_code)]
 pub mod actions;
 #[allow(dead_code)]
+pub mod adapter;
+#[allow(dead_code)]
 pub mod agentgate;
 #[allow(dead_code)]
 pub mod auth;

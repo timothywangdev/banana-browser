@@ -100,6 +100,37 @@ impl RefMap {
     pub fn set_next_ref_num(&mut self, n: usize) {
         self.next_ref = n;
     }
+
+    /// Insert a ref entry with a specific ref_id (for Patchright adapter)
+    pub fn insert_with_ref(&mut self, ref_id: String, entry: RefEntry) {
+        // Update next_ref if this ref_id is higher
+        if let Some(num_str) = ref_id.strip_prefix('e') {
+            if let Ok(num) = num_str.parse::<usize>() {
+                if num >= self.next_ref {
+                    self.next_ref = num + 1;
+                }
+            }
+        }
+        self.map.insert(ref_id, entry);
+    }
+
+    /// Get the selector for a ref (either stored selector or generated from @ref)
+    pub fn get_selector(&self, selector_or_ref: &str) -> Option<&str> {
+        let ref_id = if let Some(stripped) = selector_or_ref.strip_prefix('@') {
+            stripped
+        } else if let Some(stripped) = selector_or_ref.strip_prefix("ref=") {
+            stripped
+        } else if selector_or_ref.starts_with('e')
+            && selector_or_ref.len() > 1
+            && selector_or_ref[1..].chars().all(|c| c.is_ascii_digit())
+        {
+            selector_or_ref
+        } else {
+            return None;
+        };
+
+        self.map.get(ref_id).and_then(|entry| entry.selector.as_deref())
+    }
 }
 
 pub fn parse_ref(input: &str) -> Option<String> {

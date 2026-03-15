@@ -1711,3 +1711,790 @@ async fn e2e_inspect() {
     let resp = execute_command(&json!({ "id": "99", "action": "close" }), &mut state).await;
     assert_success(&resp);
 }
+
+// ---------------------------------------------------------------------------
+// Bot Detection: verify anti-detection measures work
+//
+// Run with: xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" \
+//   cargo test e2e_bot_detection -- --ignored --test-threads=1 --nocapture
+// ---------------------------------------------------------------------------
+
+const BOT_DETECT_ARGS: &[&str] = &[
+    "--no-sandbox",
+    "--use-gl=angle",
+    "--use-angle=vulkan",
+    "--enable-features=Vulkan",
+    "--disable-gpu-blocklist",
+];
+
+fn bot_launch_cmd() -> Value {
+    json!({ "id": "1", "action": "launch", "headless": false, "args": BOT_DETECT_ARGS })
+}
+
+/// Rebrowser Bot Detector — covers CDP leaks that cause 90% of real-world blocks.
+/// Tests Runtime.enable leak, sourceURL leak, and mainWorldExecution leak.
+#[tokio::test]
+#[ignore]
+async fn e2e_bot_detection_rebrowser() {
+    let mut state = DaemonState::new();
+
+    let resp = execute_command(&bot_launch_cmd(), &mut state).await;
+    assert_success(&resp);
+
+    let resp = execute_command(
+        &json!({ "id": "2", "action": "navigate", "url": "https://bot-detector.rebrowser.net/" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Wait for detection tests to run
+    execute_command(
+        &json!({ "id": "3", "action": "evaluate", "script": "new Promise(r => setTimeout(r, 8000))" }),
+        &mut state,
+    )
+    .await;
+
+    // Extract test results
+    let resp = execute_command(
+        &json!({
+            "id": "4",
+            "action": "evaluate",
+            "script": r#"
+                (function() {
+                    var results = {};
+                    document.querySelectorAll('[data-test-id]').forEach(function(el) {
+                        var id = el.getAttribute('data-test-id');
+                        var status = el.querySelector('.status')?.textContent?.trim() || el.textContent?.trim() || 'unknown';
+                        results[id] = status;
+                    });
+                    if (Object.keys(results).length === 0) {
+                        var body = document.body.innerText;
+                        return JSON.stringify({ _raw: body.substring(0, 2000) });
+                    }
+                    return JSON.stringify(results);
+                })()
+            "#
+        }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+    let results_str = get_data(&resp)["result"].as_str().unwrap_or("{}");
+    eprintln!("[rebrowser] Results: {}", results_str);
+
+    let resp = execute_command(&json!({ "id": "99", "action": "close" }), &mut state).await;
+    assert_success(&resp);
+}
+
+/// bot.sannysoft.com — classic detection suite (56 checks).
+/// Tests webdriver, plugins, UA, canvas, WebGL, languages, etc.
+#[tokio::test]
+#[ignore]
+async fn e2e_bot_detection_sannysoft() {
+    let mut state = DaemonState::new();
+
+    let resp = execute_command(&bot_launch_cmd(), &mut state).await;
+    assert_success(&resp);
+
+    let resp = execute_command(
+        &json!({ "id": "2", "action": "navigate", "url": "https://bot.sannysoft.com/" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    execute_command(
+        &json!({ "id": "3", "action": "evaluate", "script": "new Promise(r => setTimeout(r, 3000))" }),
+        &mut state,
+    )
+    .await;
+
+    let resp = execute_command(
+        &json!({
+            "id": "4",
+            "action": "evaluate",
+            "script": r#"
+                (function() {
+                    var results = {};
+                    document.querySelectorAll('table tr').forEach(function(row) {
+                        var cells = row.querySelectorAll('td');
+                        if (cells.length >= 2) {
+                            var key = cells[0].textContent.trim();
+                            var val = cells[1].textContent.trim();
+                            var cls = cells[1].className || '';
+                            results[key] = { value: val, passed: cls.indexOf('failed') === -1 };
+                        }
+                    });
+                    return JSON.stringify(results);
+                })()
+            "#
+        }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+    let results_str = get_data(&resp)["result"].as_str().unwrap_or("{}");
+
+    if let Ok(results) = serde_json::from_str::<Value>(results_str) {
+        if let Some(obj) = results.as_object() {
+            let total = obj.len();
+            let passed = obj.values().filter(|v| v["passed"].as_bool() == Some(true)).count();
+            let failed: Vec<_> = obj
+                .iter()
+                .filter(|(_, v)| v["passed"].as_bool() == Some(false))
+                .map(|(k, v)| format!("  FAIL: {} = {}", k, v["value"]))
+                .collect();
+
+            eprintln!("[sannysoft] Score: {}/{} passed", passed, total);
+            for f in &failed {
+                eprintln!("[sannysoft] {}", f);
+            }
+
+            assert!(
+                passed >= total - 2,
+                "Sannysoft: too many failures ({}/{}). Failures:\n{}",
+                total - passed, total, failed.join("\n")
+            );
+        }
+    }
+
+    let resp = execute_command(&json!({ "id": "99", "action": "close" }), &mut state).await;
+    assert_success(&resp);
+}
+
+/// CreepJS — deep fingerprint analysis with lie/spoofing detection.
+/// Checks for inconsistencies across browser APIs that reveal automation.
+#[tokio::test]
+#[ignore]
+async fn e2e_bot_detection_creepjs() {
+    let mut state = DaemonState::new();
+
+    let resp = execute_command(&bot_launch_cmd(), &mut state).await;
+    assert_success(&resp);
+
+    let resp = execute_command(
+        &json!({ "id": "2", "action": "navigate", "url": "https://abrahamjuliot.github.io/creepjs/" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // CreepJS takes a while to run all its checks
+    execute_command(
+        &json!({ "id": "3", "action": "evaluate", "script": "new Promise(r => setTimeout(r, 15000))" }),
+        &mut state,
+    )
+    .await;
+
+    // Extract trust score and key findings
+    let resp = execute_command(
+        &json!({
+            "id": "4",
+            "action": "evaluate",
+            "script": r#"
+                (function() {
+                    var results = {};
+                    var trustEl = document.querySelector('.visitor-info .grade, [class*=trust], [class*=score]');
+                    results.trust_score = trustEl ? trustEl.textContent.trim() : 'not found';
+                    var liesEl = document.querySelector('[class*=lies], [class*=lie]');
+                    results.lies = liesEl ? liesEl.textContent.trim().substring(0, 500) : 'none detected';
+                    var botEl = document.querySelector('[class*=bot]');
+                    results.bot_status = botEl ? botEl.textContent.trim().substring(0, 200) : 'not found';
+                    var body = document.body.innerText.substring(0, 3000);
+                    results.page_text = body;
+                    return JSON.stringify(results);
+                })()
+            "#
+        }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+    let results_str = get_data(&resp)["result"].as_str().unwrap_or("{}");
+
+    if let Ok(results) = serde_json::from_str::<Value>(results_str) {
+        eprintln!("[creepjs] Trust score: {}", results["trust_score"]);
+        eprintln!("[creepjs] Lies detected: {}", results["lies"]);
+        eprintln!("[creepjs] Bot status: {}", results["bot_status"]);
+    }
+
+    let resp = execute_command(&json!({ "id": "99", "action": "close" }), &mut state).await;
+    assert_success(&resp);
+}
+
+/// bot.incolumitas.com — behavioral bot scoring (0=bot, 1=human).
+/// Also checks IP/timezone consistency, WebGL rendering latency, etc.
+#[tokio::test]
+#[ignore]
+async fn e2e_bot_detection_incolumitas() {
+    let mut state = DaemonState::new();
+
+    let resp = execute_command(&bot_launch_cmd(), &mut state).await;
+    assert_success(&resp);
+
+    let resp = execute_command(
+        &json!({ "id": "2", "action": "navigate", "url": "https://bot.incolumitas.com/" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Incolumitas runs behavioral tests — give it time
+    execute_command(
+        &json!({ "id": "3", "action": "evaluate", "script": "new Promise(r => setTimeout(r, 10000))" }),
+        &mut state,
+    )
+    .await;
+
+    let resp = execute_command(
+        &json!({
+            "id": "4",
+            "action": "evaluate",
+            "script": r#"
+                (function() {
+                    var results = {};
+                    var scoreEl = document.querySelector('[class*=score], [class*=result], .classification');
+                    results.score = scoreEl ? scoreEl.textContent.trim().substring(0, 500) : 'not found';
+                    var tests = [];
+                    document.querySelectorAll('tr, li, [class*=test]').forEach(function(el) {
+                        var text = el.textContent.trim();
+                        if (text.length > 5 && text.length < 200) tests.push(text);
+                    });
+                    results.tests = tests.slice(0, 30);
+                    results.page_summary = document.body.innerText.substring(0, 2000);
+                    return JSON.stringify(results);
+                })()
+            "#
+        }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+    let results_str = get_data(&resp)["result"].as_str().unwrap_or("{}");
+
+    if let Ok(results) = serde_json::from_str::<Value>(results_str) {
+        eprintln!("[incolumitas] Score: {}", results["score"]);
+        if let Some(tests) = results["tests"].as_array() {
+            for t in tests.iter().take(15) {
+                eprintln!("[incolumitas]   {}", t.as_str().unwrap_or(""));
+            }
+        }
+    }
+
+    let resp = execute_command(&json!({ "id": "99", "action": "close" }), &mut state).await;
+    assert_success(&resp);
+}
+
+/// BrowserScan — checks mouse/keyboard events, browser preferences, fingerprint consistency.
+#[tokio::test]
+#[ignore]
+async fn e2e_bot_detection_browserscan() {
+    let mut state = DaemonState::new();
+
+    let resp = execute_command(&bot_launch_cmd(), &mut state).await;
+    assert_success(&resp);
+
+    let resp = execute_command(
+        &json!({ "id": "2", "action": "navigate", "url": "https://www.browserscan.net/bot-detection" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    execute_command(
+        &json!({ "id": "3", "action": "evaluate", "script": "new Promise(r => setTimeout(r, 8000))" }),
+        &mut state,
+    )
+    .await;
+
+    let resp = execute_command(
+        &json!({
+            "id": "4",
+            "action": "evaluate",
+            "script": r#"
+                (function() {
+                    var results = {};
+                    document.querySelectorAll('tr, [class*=item], [class*=row]').forEach(function(el) {
+                        var text = el.textContent.trim();
+                        if (text.includes('Pass') || text.includes('Fail') || text.includes('pass') || text.includes('fail')) {
+                            results[Object.keys(results).length] = text.substring(0, 200);
+                        }
+                    });
+                    results.page_summary = document.body.innerText.substring(0, 2000);
+                    return JSON.stringify(results);
+                })()
+            "#
+        }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+    let results_str = get_data(&resp)["result"].as_str().unwrap_or("{}");
+    eprintln!("[browserscan] Results: {}", &results_str[..results_str.len().min(2000)]);
+
+    let resp = execute_command(&json!({ "id": "99", "action": "close" }), &mut state).await;
+    assert_success(&resp);
+}
+
+/// Brotector — tests CDP leaks and automation signatures comprehensively.
+/// This is an important test for Patchright compatibility.
+/// See: https://github.com/ttlns/brotector
+#[tokio::test]
+#[ignore]
+async fn e2e_bot_detection_brotector() {
+    let mut state = DaemonState::new();
+
+    let resp = execute_command(&bot_launch_cmd(), &mut state).await;
+    assert_success(&resp);
+
+    let resp = execute_command(
+        &json!({ "id": "2", "action": "navigate", "url": "https://ttlns.github.io/brotector/" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Brotector runs async detection tests
+    execute_command(
+        &json!({ "id": "3", "action": "evaluate", "script": "new Promise(r => setTimeout(r, 8000))" }),
+        &mut state,
+    )
+    .await;
+
+    let resp = execute_command(
+        &json!({
+            "id": "4",
+            "action": "evaluate",
+            "script": r#"
+                (function() {
+                    var results = {};
+                    document.querySelectorAll('[class*=test], [class*=check], tr, li').forEach(function(el) {
+                        var text = el.textContent.trim();
+                        if (text.length > 3 && text.length < 300) {
+                            var key = Object.keys(results).length;
+                            results[key] = text;
+                        }
+                    });
+                    var statusEl = document.querySelector('[class*=status], [class*=result], [class*=score]');
+                    results.status = statusEl ? statusEl.textContent.trim() : 'not found';
+                    results.page_summary = document.body.innerText.substring(0, 2000);
+                    return JSON.stringify(results);
+                })()
+            "#
+        }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+    let results_str = get_data(&resp)["result"].as_str().unwrap_or("{}");
+    eprintln!("[brotector] Results: {}", &results_str[..results_str.len().min(2000)]);
+
+    let resp = execute_command(&json!({ "id": "99", "action": "close" }), &mut state).await;
+    assert_success(&resp);
+}
+
+/// IPHey — checks browser/IP fingerprint consistency and automation signatures.
+#[tokio::test]
+#[ignore]
+async fn e2e_bot_detection_iphey() {
+    let mut state = DaemonState::new();
+
+    let resp = execute_command(&bot_launch_cmd(), &mut state).await;
+    assert_success(&resp);
+
+    let resp = execute_command(
+        &json!({ "id": "2", "action": "navigate", "url": "https://iphey.com/" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    execute_command(
+        &json!({ "id": "3", "action": "evaluate", "script": "new Promise(r => setTimeout(r, 6000))" }),
+        &mut state,
+    )
+    .await;
+
+    let resp = execute_command(
+        &json!({
+            "id": "4",
+            "action": "evaluate",
+            "script": r#"
+                (function() {
+                    var results = {};
+                    document.querySelectorAll('[class*=result], [class*=check], [class*=status], tr').forEach(function(el) {
+                        var text = el.textContent.trim();
+                        if (text.length > 5 && text.length < 300) {
+                            results[Object.keys(results).length] = text;
+                        }
+                    });
+                    results.page_summary = document.body.innerText.substring(0, 2000);
+                    return JSON.stringify(results);
+                })()
+            "#
+        }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+    let results_str = get_data(&resp)["result"].as_str().unwrap_or("{}");
+    eprintln!("[iphey] Results: {}", &results_str[..results_str.len().min(2000)]);
+
+    let resp = execute_command(&json!({ "id": "99", "action": "close" }), &mut state).await;
+    assert_success(&resp);
+}
+
+/// Pixelscan — comprehensive fingerprint scanner checking for automation leaks.
+#[tokio::test]
+#[ignore]
+async fn e2e_bot_detection_pixelscan() {
+    let mut state = DaemonState::new();
+
+    let resp = execute_command(&bot_launch_cmd(), &mut state).await;
+    assert_success(&resp);
+
+    let resp = execute_command(
+        &json!({ "id": "2", "action": "navigate", "url": "https://pixelscan.net/fingerprint-check" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Pixelscan runs extensive checks - needs 15s to complete scan
+    execute_command(
+        &json!({ "id": "3", "action": "evaluate", "script": "new Promise(r => setTimeout(r, 15000))" }),
+        &mut state,
+    )
+    .await;
+
+    let resp = execute_command(
+        &json!({
+            "id": "4",
+            "action": "evaluate",
+            "script": r#"
+                (function() {
+                    var results = {};
+                    document.querySelectorAll('[class*=test], [class*=check], [class*=item], tr, li').forEach(function(el) {
+                        var text = el.textContent.trim();
+                        if ((text.includes('Pass') || text.includes('Fail') || text.includes('✓') || text.includes('✗') || text.includes('Warning')) && text.length < 300) {
+                            results[Object.keys(results).length] = text;
+                        }
+                    });
+                    var scoreEl = document.querySelector('[class*=score], [class*=grade], [class*=status]');
+                    results.score = scoreEl ? scoreEl.textContent.trim() : 'not found';
+                    results.page_summary = document.body.innerText.substring(0, 2000);
+                    return JSON.stringify(results);
+                })()
+            "#
+        }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+    let results_str = get_data(&resp)["result"].as_str().unwrap_or("{}");
+    eprintln!("[pixelscan] Results: {}", &results_str[..results_str.len().min(2000)]);
+
+    let resp = execute_command(&json!({ "id": "99", "action": "close" }), &mut state).await;
+    assert_success(&resp);
+}
+
+// ---------------------------------------------------------------------------
+// Patchright Bot Detection: verify anti-detection with Patchright adapter
+//
+// These tests use the Patchright engine for enhanced anti-detection.
+// Run with: AGENT_BROWSER_ENGINE=patchright xvfb-run --auto-servernum \
+//   --server-args="-screen 0 1920x1080x24" \
+//   cargo test e2e_patchright_bot -- --ignored --test-threads=1 --nocapture
+// ---------------------------------------------------------------------------
+
+const PATCHRIGHT_BOT_DETECT_ARGS: &[&str] = &[
+    "--no-sandbox",
+    "--use-gl=angle",
+    "--use-angle=vulkan",
+    "--enable-features=Vulkan",
+    "--disable-gpu-blocklist",
+];
+
+fn patchright_launch_cmd() -> Value {
+    json!({
+        "id": "1",
+        "action": "launch",
+        "headless": false,
+        "engine": "patchright",
+        "args": PATCHRIGHT_BOT_DETECT_ARGS
+    })
+}
+
+/// Patchright: bot.sannysoft.com — classic detection suite (56 checks).
+/// Tests webdriver, plugins, UA, canvas, WebGL, languages, etc.
+/// Patchright should pass 95%+ of checks with navigator.webdriver undefined.
+#[tokio::test]
+#[ignore]
+async fn e2e_patchright_bot_detection_sannysoft() {
+    let mut state = DaemonState::new();
+
+    let resp = execute_command(&patchright_launch_cmd(), &mut state).await;
+    assert_success(&resp);
+
+    let resp = execute_command(
+        &json!({ "id": "2", "action": "navigate", "url": "https://bot.sannysoft.com/" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Wait for detection tests to run
+    execute_command(
+        &json!({ "id": "3", "action": "evaluate", "script": "new Promise(r => setTimeout(r, 5000))" }),
+        &mut state,
+    )
+    .await;
+
+    // Take screenshot for visual verification
+    let screenshot_path = std::env::temp_dir()
+        .join("patchright-sannysoft.png")
+        .to_string_lossy()
+        .to_string();
+    let resp = execute_command(
+        &json!({ "id": "4", "action": "screenshot", "path": screenshot_path }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+    eprintln!("[patchright-sannysoft] Screenshot saved: {}", screenshot_path);
+
+    // Check navigator.webdriver is undefined (critical for Patchright)
+    let resp = execute_command(
+        &json!({ "id": "5", "action": "evaluate", "script": "navigator.webdriver" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+    let webdriver_val = &get_data(&resp)["result"];
+    eprintln!("[patchright-sannysoft] navigator.webdriver = {:?}", webdriver_val);
+
+    // Extract test results
+    let resp = execute_command(
+        &json!({
+            "id": "6",
+            "action": "evaluate",
+            "script": r#"
+                (function() {
+                    var results = {};
+                    document.querySelectorAll('table tr').forEach(function(row) {
+                        var cells = row.querySelectorAll('td');
+                        if (cells.length >= 2) {
+                            var key = cells[0].textContent.trim();
+                            var val = cells[1].textContent.trim();
+                            var cls = cells[1].className || '';
+                            results[key] = { value: val, passed: cls.indexOf('failed') === -1 };
+                        }
+                    });
+                    return JSON.stringify(results);
+                })()
+            "#
+        }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+    let results_str = get_data(&resp)["result"].as_str().unwrap_or("{}");
+
+    if let Ok(results) = serde_json::from_str::<Value>(results_str) {
+        if let Some(obj) = results.as_object() {
+            let total = obj.len();
+            let passed = obj.values().filter(|v| v["passed"].as_bool() == Some(true)).count();
+            let failed: Vec<_> = obj
+                .iter()
+                .filter(|(_, v)| v["passed"].as_bool() == Some(false))
+                .map(|(k, v)| format!("  FAIL: {} = {}", k, v["value"]))
+                .collect();
+
+            let pass_pct = (passed as f64 / total as f64) * 100.0;
+            eprintln!("[patchright-sannysoft] Score: {}/{} passed ({:.1}%)", passed, total, pass_pct);
+            for f in &failed {
+                eprintln!("[patchright-sannysoft] {}", f);
+            }
+
+            // Patchright should achieve 95%+ pass rate
+            assert!(
+                pass_pct >= 95.0,
+                "Patchright sannysoft: expected 95%+ pass rate, got {:.1}% ({}/{}). Failures:\n{}",
+                pass_pct, passed, total, failed.join("\n")
+            );
+        }
+    }
+
+    let resp = execute_command(&json!({ "id": "99", "action": "close" }), &mut state).await;
+    assert_success(&resp);
+}
+
+/// Patchright: bot-detector.rebrowser.net — covers CDP leaks (Runtime.enable, etc).
+/// These are the leaks that cause 90% of real-world blocks.
+/// Patchright should show green for Runtime.enable leak test.
+#[tokio::test]
+#[ignore]
+async fn e2e_patchright_bot_detection_rebrowser() {
+    let mut state = DaemonState::new();
+
+    let resp = execute_command(&patchright_launch_cmd(), &mut state).await;
+    assert_success(&resp);
+
+    let resp = execute_command(
+        &json!({ "id": "2", "action": "navigate", "url": "https://bot-detector.rebrowser.net/" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Wait for detection tests to run
+    execute_command(
+        &json!({ "id": "3", "action": "evaluate", "script": "new Promise(r => setTimeout(r, 10000))" }),
+        &mut state,
+    )
+    .await;
+
+    // Take screenshot for visual verification
+    let screenshot_path = std::env::temp_dir()
+        .join("patchright-rebrowser.png")
+        .to_string_lossy()
+        .to_string();
+    let resp = execute_command(
+        &json!({ "id": "4", "action": "screenshot", "path": screenshot_path }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+    eprintln!("[patchright-rebrowser] Screenshot saved: {}", screenshot_path);
+
+    // Extract test results
+    let resp = execute_command(
+        &json!({
+            "id": "5",
+            "action": "evaluate",
+            "script": r#"
+                (function() {
+                    var results = {};
+                    document.querySelectorAll('[data-test-id]').forEach(function(el) {
+                        var id = el.getAttribute('data-test-id');
+                        var status = el.querySelector('.status')?.textContent?.trim() || el.textContent?.trim() || 'unknown';
+                        var passed = el.classList.contains('passed') || el.querySelector('.passed') !== null ||
+                                     status.toLowerCase().includes('pass') || status.includes('✓');
+                        results[id] = { status: status, passed: passed };
+                    });
+                    if (Object.keys(results).length === 0) {
+                        var body = document.body.innerText;
+                        return JSON.stringify({ _raw: body.substring(0, 2000) });
+                    }
+                    return JSON.stringify(results);
+                })()
+            "#
+        }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+    let results_str = get_data(&resp)["result"].as_str().unwrap_or("{}");
+    eprintln!("[patchright-rebrowser] Results: {}", results_str);
+
+    let resp = execute_command(&json!({ "id": "99", "action": "close" }), &mut state).await;
+    assert_success(&resp);
+}
+
+/// Patchright: ttlns.github.io/brotector — tests CDP leaks and automation signatures.
+/// This is specifically important for Patchright as it tests CDP leak patterns.
+#[tokio::test]
+#[ignore]
+async fn e2e_patchright_bot_detection_brotector() {
+    let mut state = DaemonState::new();
+
+    let resp = execute_command(&patchright_launch_cmd(), &mut state).await;
+    assert_success(&resp);
+
+    let resp = execute_command(
+        &json!({ "id": "2", "action": "navigate", "url": "https://ttlns.github.io/brotector/" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Brotector runs async detection tests - give it time
+    execute_command(
+        &json!({ "id": "3", "action": "evaluate", "script": "new Promise(r => setTimeout(r, 10000))" }),
+        &mut state,
+    )
+    .await;
+
+    // Take screenshot for visual verification
+    let screenshot_path = std::env::temp_dir()
+        .join("patchright-brotector.png")
+        .to_string_lossy()
+        .to_string();
+    let resp = execute_command(
+        &json!({ "id": "4", "action": "screenshot", "path": screenshot_path }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+    eprintln!("[patchright-brotector] Screenshot saved: {}", screenshot_path);
+
+    // Check navigator.webdriver is undefined
+    let resp = execute_command(
+        &json!({ "id": "5", "action": "evaluate", "script": "navigator.webdriver" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+    let webdriver_val = &get_data(&resp)["result"];
+    eprintln!("[patchright-brotector] navigator.webdriver = {:?}", webdriver_val);
+
+    // Extract test results
+    let resp = execute_command(
+        &json!({
+            "id": "6",
+            "action": "evaluate",
+            "script": r#"
+                (function() {
+                    var results = { tests: [], summary: {} };
+                    document.querySelectorAll('[class*=test], [class*=check], tr, li').forEach(function(el) {
+                        var text = el.textContent.trim();
+                        if (text.length > 3 && text.length < 300) {
+                            var passed = el.classList.contains('pass') || el.classList.contains('ok') ||
+                                         text.includes('✓') || text.toLowerCase().includes('pass');
+                            var failed = el.classList.contains('fail') || el.classList.contains('error') ||
+                                         text.includes('✗') || text.toLowerCase().includes('fail');
+                            results.tests.push({ text: text, passed: passed, failed: failed });
+                        }
+                    });
+                    var statusEl = document.querySelector('[class*=status], [class*=result], [class*=score]');
+                    results.summary.status = statusEl ? statusEl.textContent.trim() : 'not found';
+                    results.summary.page_text = document.body.innerText.substring(0, 1500);
+                    return JSON.stringify(results);
+                })()
+            "#
+        }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+    let results_str = get_data(&resp)["result"].as_str().unwrap_or("{}");
+
+    if let Ok(results) = serde_json::from_str::<Value>(results_str) {
+        eprintln!("[patchright-brotector] Status: {}", results["summary"]["status"]);
+        if let Some(tests) = results["tests"].as_array() {
+            let passed_count = tests.iter().filter(|t| t["passed"].as_bool() == Some(true)).count();
+            let failed_count = tests.iter().filter(|t| t["failed"].as_bool() == Some(true)).count();
+            eprintln!("[patchright-brotector] Tests: {} passed, {} failed, {} total",
+                      passed_count, failed_count, tests.len());
+            for t in tests.iter().filter(|t| t["failed"].as_bool() == Some(true)).take(10) {
+                eprintln!("[patchright-brotector]   FAIL: {}", t["text"].as_str().unwrap_or(""));
+            }
+        }
+    } else {
+        eprintln!("[patchright-brotector] Raw results: {}", &results_str[..results_str.len().min(2000)]);
+    }
+
+    let resp = execute_command(&json!({ "id": "99", "action": "close" }), &mut state).await;
+    assert_success(&resp);
+}

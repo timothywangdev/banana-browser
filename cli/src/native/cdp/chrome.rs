@@ -127,6 +127,11 @@ fn build_chrome_args(options: &LaunchOptions) -> Result<ChromeArgs, String> {
     if let Ok(path) = std::env::var("PATCHRIGHT_BROWSER_EXECUTABLE") {
         if PathBuf::from(&path).exists() {
             args.push("--disable-blink-features=AutomationControlled".to_string());
+            // Use ANGLE Vulkan backend for real GPU WebGL rendering (avoids SwiftShader detection)
+            args.push("--use-gl=angle".to_string());
+            args.push("--use-angle=vulkan".to_string());
+            args.push("--enable-features=Vulkan".to_string());
+            args.push("--disable-gpu-blocklist".to_string());
         }
     }
 
