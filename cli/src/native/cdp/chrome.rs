@@ -751,8 +751,10 @@ mod tests {
 
     #[test]
     fn test_find_playwright_chromium_nonexistent() {
-        let _guard = EnvGuard::new(&["PLAYWRIGHT_BROWSERS_PATH"]);
+        let _guard = EnvGuard::new(&["PLAYWRIGHT_BROWSERS_PATH", "HOME"]);
         _guard.set("PLAYWRIGHT_BROWSERS_PATH", "/nonexistent/path");
+        // Override HOME so the fallback ~/.cache/ms-playwright also points nowhere
+        _guard.set("HOME", "/nonexistent");
         let result = find_playwright_chromium();
         assert!(result.is_none());
     }

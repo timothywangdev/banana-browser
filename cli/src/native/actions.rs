@@ -1581,14 +1581,29 @@ async fn handle_fill(cmd: &Value, state: &mut DaemonState) -> Result<Value, Stri
         .get("selector")
         .and_then(|v| v.as_str())
         .ok_or("Missing 'selector' parameter")?;
-    let value = cmd
-        .get("value")
-        .and_then(|v| v.as_str())
-        .ok_or("Missing 'value' parameter")?;
+
+    // Resolve the value: --secret fetches from AgentGate, --otp fetches OTP, otherwise plain text
+    let value: String = if let Some(secret_key) = cmd.get("secret").and_then(|v| v.as_str()) {
+        let current_url = if let Some(ref mgr) = state.browser {
+            mgr.get_url().await.unwrap_or_default()
+        } else {
+            String::new()
+        };
+        let cred = super::agentgate::inject_credential(secret_key, &current_url).await?;
+        cred.value
+    } else if let Some(service) = cmd.get("otp").and_then(|v| v.as_str()) {
+        let otp = super::agentgate::get_latest_otp(service).await?;
+        otp.code
+    } else {
+        cmd.get("value")
+            .and_then(|v| v.as_str())
+            .ok_or("Missing 'value', '--secret', or '--otp' parameter")?
+            .to_string()
+    };
 
     if let Some(ref wb) = state.webdriver_backend {
         if state.browser.is_none() {
-            wb.fill(selector, value).await?;
+            wb.fill(selector, &value).await?;
             return Ok(json!({ "filled": selector }));
         }
     }
@@ -1596,7 +1611,7 @@ async fn handle_fill(cmd: &Value, state: &mut DaemonState) -> Result<Value, Stri
     let mgr = state.browser.as_ref().ok_or("Browser not launched")?;
     let session_id = mgr.active_session_id()?.to_string();
 
-    interaction::fill(&mgr.client, &session_id, &state.ref_map, selector, value).await?;
+    interaction::fill(&mgr.client, &session_id, &state.ref_map, selector, &value).await?;
     Ok(json!({ "filled": selector }))
 }
 

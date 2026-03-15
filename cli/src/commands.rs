@@ -161,9 +161,25 @@ pub fn parse_command(args: &[String], flags: &Flags) -> Result<Value, ParseError
         "fill" => {
             let sel = rest.first().ok_or_else(|| ParseError::MissingArguments {
                 context: "fill".to_string(),
-                usage: "fill <selector> <text>",
+                usage: "fill <selector> <text | --secret KEY | --otp SERVICE>",
             })?;
-            Ok(json!({ "id": id, "action": "fill", "selector": sel, "value": rest[1..].join(" ") }))
+            let mut cmd = json!({ "id": id, "action": "fill", "selector": sel });
+            if let Some(idx) = rest.iter().position(|s| *s == "--secret") {
+                let key = rest.get(idx + 1).ok_or_else(|| ParseError::MissingArguments {
+                    context: "fill --secret".to_string(),
+                    usage: "fill <selector> --secret <key>",
+                })?;
+                cmd["secret"] = json!(key);
+            } else if let Some(idx) = rest.iter().position(|s| *s == "--otp") {
+                let service = rest.get(idx + 1).ok_or_else(|| ParseError::MissingArguments {
+                    context: "fill --otp".to_string(),
+                    usage: "fill <selector> --otp <service>",
+                })?;
+                cmd["otp"] = json!(service);
+            } else {
+                cmd["value"] = json!(rest[1..].join(" "));
+            }
+            Ok(cmd)
         }
         "type" => {
             let sel = rest.first().ok_or_else(|| ParseError::MissingArguments {

@@ -1,0 +1,11 @@
+{
+  "name": "mock-agentgate",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node mock_agentgate.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}
