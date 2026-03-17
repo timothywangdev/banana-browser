@@ -1,97 +1,75 @@
 #!/usr/bin/env node
 
 /**
- * Postinstall script for agent-browser
- * 
- * Downloads the platform-specific native binary if not present.
- * On global installs, patches npm's bin entry to use the native binary directly:
- * - Windows: Overwrites .cmd/.ps1 shims
- * - Mac/Linux: Replaces symlink to point to native binary
+ * Postinstall script for banana-browser
+ *
+ * Downloads the platform-specific native binary from GitHub releases.
+ * On global installs, patches npm's bin entry to use the native binary directly.
+ *
+ * Uses foundational modules:
+ * - ../lib/platform.js for platform detection
+ * - ../lib/github-releases.js for release info
+ * - ./download-binary.js for download with progress
  */
 
-import { existsSync, mkdirSync, chmodSync, createWriteStream, unlinkSync, writeFileSync, symlinkSync, lstatSync } from 'fs';
+import { existsSync, mkdirSync, chmodSync, writeFileSync, symlinkSync, unlinkSync, lstatSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import { platform, arch } from 'os';
-import { get } from 'https';
+import { platform } from 'os';
 import { execSync } from 'child_process';
+
+// Import foundational modules
+import { getPlatform, isPlatformSupported } from '../lib/platform.js';
+import { getLatestRelease, getAssetUrl, buildDirectDownloadUrl } from '../lib/github-releases.js';
+import { downloadBinary } from './download-binary.js';
+import { setConfig } from '../lib/config.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = join(__dirname, '..');
 const binDir = join(projectRoot, 'bin');
 
-// Detect if the system uses musl libc (e.g. Alpine Linux)
-function isMusl() {
-  if (platform() !== 'linux') return false;
-  try {
-    const result = execSync('ldd --version 2>&1 || true', { encoding: 'utf8' });
-    return result.toLowerCase().includes('musl');
-  } catch {
-    return existsSync('/lib/ld-musl-x86_64.so.1') || existsSync('/lib/ld-musl-aarch64.so.1');
-  }
-}
-
-// Platform detection
-const osKey = platform() === 'linux' && isMusl() ? 'linux-musl' : platform();
-const platformKey = `${osKey}-${arch()}`;
-const ext = platform() === 'win32' ? '.exe' : '';
-const binaryName = `agent-browser-${platformKey}${ext}`;
-const binaryPath = join(binDir, binaryName);
-
 // Package info
-const packageJson = JSON.parse(
-  (await import('fs')).readFileSync(join(projectRoot, 'package.json'), 'utf8')
-);
-const version = packageJson.version;
-
-// GitHub release URL
-const GITHUB_REPO = 'vercel-labs/agent-browser';
-const DOWNLOAD_URL = `https://github.com/${GITHUB_REPO}/releases/download/v${version}/${binaryName}`;
-
-async function downloadFile(url, dest) {
-  return new Promise((resolve, reject) => {
-    const file = createWriteStream(dest);
-    
-    const request = (url) => {
-      get(url, (response) => {
-        // Handle redirects
-        if (response.statusCode === 301 || response.statusCode === 302) {
-          request(response.headers.location);
-          return;
-        }
-        
-        if (response.statusCode !== 200) {
-          reject(new Error(`Failed to download: HTTP ${response.statusCode}`));
-          return;
-        }
-        
-        response.pipe(file);
-        file.on('finish', () => {
-          file.close();
-          resolve();
-        });
-      }).on('error', (err) => {
-        unlinkSync(dest);
-        reject(err);
-      });
-    };
-    
-    request(url);
-  });
+let packageJson;
+try {
+  const fs = await import('fs');
+  packageJson = JSON.parse(fs.readFileSync(join(projectRoot, 'package.json'), 'utf8'));
+} catch {
+  packageJson = { version: '0.0.0' };
 }
 
+const GITHUB_REPO = 'vercel-labs/agent-browser';
+
+/**
+ * Main postinstall function
+ */
 async function main() {
+  // Check platform support
+  if (!isPlatformSupported()) {
+    console.log('');
+    console.log('  Warning: Unsupported platform');
+    console.log('  Binary download skipped. You may need to build from source.');
+    console.log('');
+    showInstallReminder();
+    return;
+  }
+
+  const { binaryName, platformKey } = getPlatform();
+  const binaryPath = join(binDir, binaryName);
+
   // Check if binary already exists
   if (existsSync(binaryPath)) {
     // Ensure binary is executable (npm doesn't preserve execute bit)
     if (platform() !== 'win32') {
       chmodSync(binaryPath, 0o755);
     }
-    console.log(`✓ Native binary ready: ${binaryName}`);
-    
+    console.log(`  Native binary ready: ${binaryName}`);
+
+    // Store version in config
+    setConfig('installedVersion', packageJson.version);
+
     // On global installs, fix npm's bin entry to use native binary directly
-    await fixGlobalInstallBin();
-    
+    await fixGlobalInstallBin(binaryPath);
+
     showInstallReminder();
     return;
   }
@@ -101,42 +79,90 @@ async function main() {
     mkdirSync(binDir, { recursive: true });
   }
 
-  console.log(`Downloading native binary for ${platformKey}...`);
-  console.log(`URL: ${DOWNLOAD_URL}`);
+  console.log('');
+  console.log(`  Downloading native binary for ${platformKey}...`);
 
   try {
-    await downloadFile(DOWNLOAD_URL, binaryPath);
-    
-    // Make executable on Unix
-    if (platform() !== 'win32') {
-      chmodSync(binaryPath, 0o755);
+    // Try to get latest release info from GitHub API
+    let downloadUrl;
+    let version = packageJson.version;
+
+    try {
+      const release = await getLatestRelease(GITHUB_REPO);
+      downloadUrl = getAssetUrl(release, binaryName);
+      version = release.version;
+
+      if (!downloadUrl) {
+        // Asset not found in release, fall back to version-based URL
+        downloadUrl = buildDirectDownloadUrl(GITHUB_REPO, `v${packageJson.version}`, binaryName);
+      }
+    } catch (apiError) {
+      // GitHub API failed (rate limit, network error, etc.)
+      // Fall back to direct download URL using package version
+      console.log('  Using package version for download...');
+      downloadUrl = buildDirectDownloadUrl(GITHUB_REPO, `v${packageJson.version}`, binaryName);
     }
-    
-    console.log(`✓ Downloaded native binary: ${binaryName}`);
+
+    // Download binary with progress
+    const result = await downloadBinary(downloadUrl, binaryPath, {
+      silent: false,
+      executable: true,
+    });
+
+    if (result.success) {
+      console.log(`  Native binary installed: ${binaryName}`);
+
+      // Store version in config
+      setConfig('installedVersion', version);
+    } else {
+      handleDownloadFailure(result.error);
+      return;
+    }
   } catch (err) {
-    console.log(`Could not download native binary: ${err.message}`);
-    console.log('');
-    console.log('To build the native binary locally:');
-    console.log('  1. Install Rust: https://rustup.rs');
-    console.log('  2. Run: npm run build:native');
+    handleDownloadFailure(err.message);
+    return;
   }
 
   // On global installs, fix npm's bin entry to use native binary directly
-  // This avoids the /bin/sh error on Windows and provides zero-overhead execution
-  await fixGlobalInstallBin();
+  await fixGlobalInstallBin(binaryPath);
 
   showInstallReminder();
 }
 
+/**
+ * Handle download failure gracefully
+ * Don't fail npm install completely - warn and continue
+ */
+function handleDownloadFailure(errorMessage) {
+  console.log('');
+  console.log('  Warning: Could not download native binary');
+  console.log(`  ${errorMessage || 'Unknown error'}`);
+  console.log('');
+  console.log('  To retry the download, run:');
+  console.log('');
+  console.log('    npx banana-browser --install-binary');
+  console.log('');
+  console.log('  Or build the native binary locally:');
+  console.log('    1. Install Rust: https://rustup.rs');
+  console.log('    2. Run: npm run build:native');
+  console.log('');
+
+  // Don't exit with error - allow npm install to complete
+  // The CLI wrapper will show a helpful error if binary is missing
+}
+
+/**
+ * Show post-install reminder about Chromium
+ */
 function showInstallReminder() {
   console.log('');
-  console.log('  To download Chrome, run:');
+  console.log('  To download Chromium, run:');
   console.log('');
-  console.log('    agent-browser install');
+  console.log('    banana-browser install');
   console.log('');
   console.log('  On Linux, include system dependencies with:');
   console.log('');
-  console.log('    agent-browser install --with-deps');
+  console.log('    banana-browser install --with-deps');
   console.log('');
 }
 
@@ -144,11 +170,11 @@ function showInstallReminder() {
  * Fix npm's bin entry on global installs to use the native binary directly.
  * This provides zero-overhead CLI execution for global installs.
  */
-async function fixGlobalInstallBin() {
+async function fixGlobalInstallBin(binaryPath) {
   if (platform() === 'win32') {
-    await fixWindowsShims();
+    await fixWindowsShims(binaryPath);
   } else {
-    await fixUnixSymlink();
+    await fixUnixSymlink(binaryPath);
   }
 }
 
@@ -156,7 +182,7 @@ async function fixGlobalInstallBin() {
  * Fix npm symlink on Mac/Linux global installs.
  * Replace the symlink to the JS wrapper with a symlink to the native binary.
  */
-async function fixUnixSymlink() {
+async function fixUnixSymlink(binaryPath) {
   // Get npm's global bin directory (npm prefix -g + /bin)
   let npmBinDir;
   try {
@@ -166,7 +192,7 @@ async function fixUnixSymlink() {
     return; // npm not available
   }
 
-  const symlinkPath = join(npmBinDir, 'agent-browser');
+  const symlinkPath = join(npmBinDir, 'banana-browser');
 
   // Check if symlink exists (indicates global install)
   try {
@@ -182,10 +208,10 @@ async function fixUnixSymlink() {
   try {
     unlinkSync(symlinkPath);
     symlinkSync(binaryPath, symlinkPath);
-    console.log('✓ Optimized: symlink points to native binary (zero overhead)');
+    console.log('  Optimized: symlink points to native binary (zero overhead)');
   } catch (err) {
     // Permission error or other issue - not critical, JS wrapper still works
-    console.log(`⚠ Could not optimize symlink: ${err.message}`);
+    console.log(`  Note: Could not optimize symlink: ${err.message}`);
     console.log('  CLI will work via Node.js wrapper (slightly slower startup)');
   }
 }
@@ -195,7 +221,7 @@ async function fixUnixSymlink() {
  * npm generates shims that try to run /bin/sh, which doesn't exist on Windows.
  * We overwrite them to invoke the native .exe directly.
  */
-async function fixWindowsShims() {
+async function fixWindowsShims(binaryPath) {
   let npmBinDir;
   try {
     npmBinDir = execSync('npm prefix -g', { encoding: 'utf8' }).trim();
@@ -203,38 +229,44 @@ async function fixWindowsShims() {
     return;
   }
 
-  const cmdShim = join(npmBinDir, 'agent-browser.cmd');
-  const ps1Shim = join(npmBinDir, 'agent-browser.ps1');
+  const cmdShim = join(npmBinDir, 'banana-browser.cmd');
+  const ps1Shim = join(npmBinDir, 'banana-browser.ps1');
 
-  // Shims may not exist yet during postinstall (npm creates them after
-  // lifecycle scripts). If missing, fall back: the JS wrapper at
-  // bin/agent-browser.js handles Windows correctly via child_process.spawn.
+  // Shims may not exist yet during postinstall
   if (!existsSync(cmdShim)) {
     return;
   }
 
-  // Detect architecture so ARM64 Windows is handled correctly
-  const cpuArch = arch() === 'arm64' ? 'arm64' : 'x64';
-  const relativeBinaryPath = `node_modules\\agent-browser\\bin\\agent-browser-win32-${cpuArch}.exe`;
-  const absoluteBinaryPath = join(npmBinDir, relativeBinaryPath);
-
   // Only rewrite shims if the native binary actually exists
-  if (!existsSync(absoluteBinaryPath)) {
+  if (!existsSync(binaryPath)) {
     return;
   }
 
   try {
-    const cmdContent = `@ECHO off\r\n"%~dp0${relativeBinaryPath}" %*\r\n`;
+    // Use relative path from npm bin to the binary
+    const relativeBinaryPath = binaryPath.replace(npmBinDir + '\\', '').replace(npmBinDir + '/', '');
+
+    const cmdContent = `@ECHO off\r\n"${binaryPath}" %*\r\n`;
     writeFileSync(cmdShim, cmdContent);
 
-    const ps1Content = `#!/usr/bin/env pwsh\r\n$basedir = Split-Path $MyInvocation.MyCommand.Definition -Parent\r\n& "$basedir\\${relativeBinaryPath}" $args\r\nexit $LASTEXITCODE\r\n`;
+    const ps1Content = `#!/usr/bin/env pwsh\r\n& "${binaryPath}" $args\r\nexit $LASTEXITCODE\r\n`;
     writeFileSync(ps1Shim, ps1Content);
 
-    console.log('✓ Optimized: shims point to native binary (zero overhead)');
+    console.log('  Optimized: shims point to native binary (zero overhead)');
   } catch (err) {
-    console.log(`⚠ Could not optimize shims: ${err.message}`);
+    console.log(`  Note: Could not optimize shims: ${err.message}`);
     console.log('  CLI will work via Node.js wrapper (slightly slower startup)');
   }
 }
 
-main().catch(console.error);
+// Run main function
+main().catch((err) => {
+  // Catch-all error handler - don't fail npm install
+  console.log('');
+  console.log('  Warning: Postinstall encountered an error');
+  console.log(`  ${err.message}`);
+  console.log('');
+  console.log('  The package was installed, but you may need to run:');
+  console.log('    npx banana-browser --install-binary');
+  console.log('');
+});

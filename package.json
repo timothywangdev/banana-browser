@@ -1,17 +1,22 @@
 {
-  "name": "agent-browser",
+  "name": "banana-browser",
   "version": "0.20.5",
-  "description": "Headless browser automation CLI for AI agents",
+  "description": "Stealth browser automation that bypasses bot detection. Undetectable headless Chrome for AI agents and web scraping.",
   "type": "module",
   "files": [
     "bin",
+    "lib",
     "scripts",
     "skills"
   ],
   "bin": {
-    "agent-browser": "./bin/agent-browser.js"
+    "banana-browser": "./bin/banana-browser.js"
   },
   "scripts": {
+    "demo": "node scripts/demo.js",
+    "install": "node scripts/postinstall.js",
+    "dev:setup": "node scripts/dev-setup.js",
+    "test": "node --test 'tests/**/*.test.js'",
     "version:sync": "node scripts/sync-version.js",
     "version": "npm run version:sync && git add cli/Cargo.toml",
     "build:native": "npm run version:sync && cargo build --release --manifest-path cli/Cargo.toml && node scripts/copy-native.js",
@@ -33,7 +38,13 @@
     "chrome",
     "cdp",
     "cli",
-    "agent"
+    "agent",
+    "stealth",
+    "anti-detection",
+    "bot-detection",
+    "patchright",
+    "undetectable",
+    "web-scraping"
   ],
   "license": "Apache-2.0",
   "repository": {
@@ -44,6 +55,11 @@
     "url": "https://github.com/vercel-labs/agent-browser/issues"
   },
   "homepage": "https://github.com/vercel-labs/agent-browser#readme",
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "ora": "^8.0.1",
+    "patchright": "^1.58.2"
+  },
   "devDependencies": {
     "@changesets/cli": "^2.29.8"
   }

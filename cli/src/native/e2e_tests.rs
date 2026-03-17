@@ -2498,3 +2498,515 @@ async fn e2e_patchright_bot_detection_brotector() {
     let resp = execute_command(&json!({ "id": "99", "action": "close" }), &mut state).await;
     assert_success(&resp);
 }
+
+// ---------------------------------------------------------------------------
+// AgentGate: Secret and OTP injection via mock AgentGate service
+// ---------------------------------------------------------------------------
+
+/// US1 T007: Fill username field with secret injection
+#[tokio::test]
+#[ignore]
+async fn e2e_agentgate_fill_username_secret() {
+    let mut state = DaemonState::new();
+
+    // Launch headless Chrome
+    let resp = execute_command(
+        &json!({ "id": "1", "action": "launch", "headless": true }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Navigate to test login page
+    let resp = execute_command(
+        &json!({ "id": "2", "action": "navigate", "url": "file:///home/wearaway/projects/ai/agentgate/banana-browser/tools/test-login.html" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Fill username with secret
+    let resp = execute_command(
+        &json!({ "id": "3", "action": "fill", "selector": "#username", "secret": "test-username" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Verify the value was filled correctly
+    let resp = execute_command(
+        &json!({ "id": "4", "action": "evaluate", "script": "document.querySelector('#username').value" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+    assert_eq!(get_data(&resp)["result"], "testuser@example.com");
+
+    // Close
+    let resp = execute_command(&json!({ "id": "99", "action": "close" }), &mut state).await;
+    assert_success(&resp);
+}
+
+/// US1 T008: Fill password field with secret injection
+#[tokio::test]
+#[ignore]
+async fn e2e_agentgate_fill_password_secret() {
+    let mut state = DaemonState::new();
+
+    // Launch headless Chrome
+    let resp = execute_command(
+        &json!({ "id": "1", "action": "launch", "headless": true }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Navigate to test login page
+    let resp = execute_command(
+        &json!({ "id": "2", "action": "navigate", "url": "file:///home/wearaway/projects/ai/agentgate/banana-browser/tools/test-login.html" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Fill password with secret
+    let resp = execute_command(
+        &json!({ "id": "3", "action": "fill", "selector": "#password", "secret": "test-password" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Verify the value was filled correctly
+    let resp = execute_command(
+        &json!({ "id": "4", "action": "evaluate", "script": "document.querySelector('#password').value" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+    assert_eq!(get_data(&resp)["result"], "SecureP@ss123");
+
+    // Close
+    let resp = execute_command(&json!({ "id": "99", "action": "close" }), &mut state).await;
+    assert_success(&resp);
+}
+
+/// US1 T009-T010: Fill both username and password with secrets in sequence
+#[tokio::test]
+#[ignore]
+async fn e2e_agentgate_fill_both_secrets() {
+    let mut state = DaemonState::new();
+
+    // Launch headless Chrome
+    let resp = execute_command(
+        &json!({ "id": "1", "action": "launch", "headless": true }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Navigate to test login page
+    let resp = execute_command(
+        &json!({ "id": "2", "action": "navigate", "url": "file:///home/wearaway/projects/ai/agentgate/banana-browser/tools/test-login.html" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Fill username with secret
+    let resp = execute_command(
+        &json!({ "id": "3", "action": "fill", "selector": "#username", "secret": "test-username" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Fill password with secret
+    let resp = execute_command(
+        &json!({ "id": "4", "action": "fill", "selector": "#password", "secret": "test-password" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Verify username value
+    let resp = execute_command(
+        &json!({ "id": "5", "action": "evaluate", "script": "document.querySelector('#username').value" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+    assert_eq!(get_data(&resp)["result"], "testuser@example.com");
+
+    // Verify password value
+    let resp = execute_command(
+        &json!({ "id": "6", "action": "evaluate", "script": "document.querySelector('#password').value" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+    assert_eq!(get_data(&resp)["result"], "SecureP@ss123");
+
+    // Close
+    let resp = execute_command(&json!({ "id": "99", "action": "close" }), &mut state).await;
+    assert_success(&resp);
+}
+
+/// US2 T011-T012: Fill OTP field with OTP injection
+#[tokio::test]
+#[ignore]
+async fn e2e_agentgate_fill_otp() {
+    let mut state = DaemonState::new();
+
+    // Launch headless Chrome
+    let resp = execute_command(
+        &json!({ "id": "1", "action": "launch", "headless": true }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Navigate to test login page
+    let resp = execute_command(
+        &json!({ "id": "2", "action": "navigate", "url": "file:///home/wearaway/projects/ai/agentgate/banana-browser/tools/test-login.html" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Fill OTP field with OTP injection
+    let resp = execute_command(
+        &json!({ "id": "3", "action": "fill", "selector": "#otp-code", "otp": "my-service" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Verify the OTP value is 6 digits
+    let resp = execute_command(
+        &json!({ "id": "4", "action": "evaluate", "script": "document.querySelector('#otp-code').value" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+    let otp_value = get_data(&resp)["result"].as_str().unwrap_or("");
+    assert_eq!(otp_value.len(), 6, "OTP should be 6 digits, got: {}", otp_value);
+    assert!(otp_value.chars().all(|c| c.is_ascii_digit()), "OTP should contain only digits, got: {}", otp_value);
+
+    // Close
+    let resp = execute_command(&json!({ "id": "99", "action": "close" }), &mut state).await;
+    assert_success(&resp);
+}
+
+/// US3 T013-T014: Error handling when secret key is not found
+#[tokio::test]
+#[ignore]
+async fn e2e_agentgate_secret_not_found() {
+    let mut state = DaemonState::new();
+
+    // Launch headless Chrome
+    let resp = execute_command(
+        &json!({ "id": "1", "action": "launch", "headless": true }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Navigate to test login page
+    let resp = execute_command(
+        &json!({ "id": "2", "action": "navigate", "url": "file:///home/wearaway/projects/ai/agentgate/banana-browser/tools/test-login.html" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Try to fill with nonexistent secret key
+    let resp = execute_command(
+        &json!({ "id": "3", "action": "fill", "selector": "#username", "secret": "nonexistent-key" }),
+        &mut state,
+    )
+    .await;
+
+    // Verify error response
+    assert_eq!(resp["success"], false, "Expected failure for nonexistent secret");
+    let error_msg = resp["error"].as_str().unwrap_or("");
+    assert!(
+        error_msg.to_lowercase().contains("not found") || error_msg.to_lowercase().contains("nonexistent-key"),
+        "Error should mention 'not found' or the key name, got: {}",
+        error_msg
+    );
+
+    // Close
+    let resp = execute_command(&json!({ "id": "99", "action": "close" }), &mut state).await;
+    assert_success(&resp);
+}
+
+/// US3 T015-T016: Error handling when OTP service is not found
+#[tokio::test]
+#[ignore]
+async fn e2e_agentgate_otp_not_found() {
+    let mut state = DaemonState::new();
+
+    // Launch headless Chrome
+    let resp = execute_command(
+        &json!({ "id": "1", "action": "launch", "headless": true }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Navigate to test login page
+    let resp = execute_command(
+        &json!({ "id": "2", "action": "navigate", "url": "file:///home/wearaway/projects/ai/agentgate/banana-browser/tools/test-login.html" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Try to fill with nonexistent OTP service
+    let resp = execute_command(
+        &json!({ "id": "3", "action": "fill", "selector": "#otp-code", "otp": "nonexistent-otp" }),
+        &mut state,
+    )
+    .await;
+
+    // Verify error response
+    assert_eq!(resp["success"], false, "Expected failure for nonexistent OTP service");
+    let error_msg = resp["error"].as_str().unwrap_or("");
+    assert!(
+        error_msg.to_lowercase().contains("not found") || error_msg.to_lowercase().contains("nonexistent-otp"),
+        "Error should mention 'not found' or the OTP service name, got: {}",
+        error_msg
+    );
+
+    // Close
+    let resp = execute_command(&json!({ "id": "99", "action": "close" }), &mut state).await;
+    assert_success(&resp);
+}
+
+/// US4 T017-T020: Error handling when AgentGate is unreachable (connection refused)
+#[tokio::test]
+#[ignore]
+async fn e2e_agentgate_connection_refused() {
+    // Save original env var
+    let original_url = std::env::var("AGENTGATE_API_URL").ok();
+
+    // Unset or set to invalid URL to trigger connection error
+    std::env::remove_var("AGENTGATE_API_URL");
+
+    let mut state = DaemonState::new();
+
+    // Launch headless Chrome
+    let resp = execute_command(
+        &json!({ "id": "1", "action": "launch", "headless": true }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Navigate to test login page
+    let resp = execute_command(
+        &json!({ "id": "2", "action": "navigate", "url": "file:///home/wearaway/projects/ai/agentgate/banana-browser/tools/test-login.html" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Try to fill with secret - should fail due to missing/unreachable AgentGate
+    let resp = execute_command(
+        &json!({ "id": "3", "action": "fill", "selector": "#username", "secret": "test-username" }),
+        &mut state,
+    )
+    .await;
+
+    // Verify error response mentions connection issue
+    assert_eq!(resp["success"], false, "Expected failure when AgentGate is unreachable");
+    let error_msg = resp["error"].as_str().unwrap_or("");
+    assert!(
+        error_msg.to_lowercase().contains("connection") ||
+        error_msg.to_lowercase().contains("unreachable") ||
+        error_msg.to_lowercase().contains("agentgate") ||
+        error_msg.to_lowercase().contains("url") ||
+        error_msg.to_lowercase().contains("not set"),
+        "Error should mention connection issue, got: {}",
+        error_msg
+    );
+
+    // Close
+    let resp = execute_command(&json!({ "id": "99", "action": "close" }), &mut state).await;
+    assert_success(&resp);
+
+    // Restore original env var
+    if let Some(url) = original_url {
+        std::env::set_var("AGENTGATE_API_URL", url);
+    }
+}
+
+/// US5 T021-T022: Patchright engine with secret injection
+#[tokio::test]
+#[ignore]
+async fn e2e_patchright_secret_injection() {
+    let mut state = DaemonState::new();
+
+    // Launch with Patchright engine
+    let resp = execute_command(
+        &json!({ "id": "1", "action": "launch", "headless": true, "engine": "patchright" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Navigate to test login page
+    let resp = execute_command(
+        &json!({ "id": "2", "action": "navigate", "url": "file:///home/wearaway/projects/ai/agentgate/banana-browser/tools/test-login.html" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Fill username with secret
+    let resp = execute_command(
+        &json!({ "id": "3", "action": "fill", "selector": "#username", "secret": "test-username" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Fill password with secret
+    let resp = execute_command(
+        &json!({ "id": "4", "action": "fill", "selector": "#password", "secret": "test-password" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Verify username value
+    let resp = execute_command(
+        &json!({ "id": "5", "action": "evaluate", "script": "document.querySelector('#username').value" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+    assert_eq!(get_data(&resp)["result"], "testuser@example.com");
+
+    // Verify password value
+    let resp = execute_command(
+        &json!({ "id": "6", "action": "evaluate", "script": "document.querySelector('#password').value" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+    assert_eq!(get_data(&resp)["result"], "SecureP@ss123");
+
+    // Close
+    let resp = execute_command(&json!({ "id": "99", "action": "close" }), &mut state).await;
+    assert_success(&resp);
+}
+
+/// US5 T023: Patchright full login flow with secret injection and form submission
+#[tokio::test]
+#[ignore]
+async fn e2e_patchright_full_login_flow() {
+    let mut state = DaemonState::new();
+
+    // Launch with Patchright engine
+    let resp = execute_command(
+        &json!({ "id": "1", "action": "launch", "headless": true, "engine": "patchright" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Navigate to test login page
+    let resp = execute_command(
+        &json!({ "id": "2", "action": "navigate", "url": "file:///home/wearaway/projects/ai/agentgate/banana-browser/tools/test-login.html" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Fill username with secret
+    let resp = execute_command(
+        &json!({ "id": "3", "action": "fill", "selector": "#username", "secret": "test-username" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Fill password with secret
+    let resp = execute_command(
+        &json!({ "id": "4", "action": "fill", "selector": "#password", "secret": "test-password" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Click submit button
+    let resp = execute_command(
+        &json!({ "id": "5", "action": "click", "selector": "button[type='submit']" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Wait briefly for any form handling
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+    // Verify the form was submitted (check that fields still have values after click)
+    let resp = execute_command(
+        &json!({ "id": "6", "action": "evaluate", "script": "document.querySelector('#username').value" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Close
+    let resp = execute_command(&json!({ "id": "99", "action": "close" }), &mut state).await;
+    assert_success(&resp);
+}
+
+/// US5 T024: Patchright OTP injection
+#[tokio::test]
+#[ignore]
+async fn e2e_patchright_otp_injection() {
+    let mut state = DaemonState::new();
+
+    // Launch with Patchright engine
+    let resp = execute_command(
+        &json!({ "id": "1", "action": "launch", "headless": true, "engine": "patchright" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Navigate to test login page
+    let resp = execute_command(
+        &json!({ "id": "2", "action": "navigate", "url": "file:///home/wearaway/projects/ai/agentgate/banana-browser/tools/test-login.html" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Fill OTP field with OTP injection
+    let resp = execute_command(
+        &json!({ "id": "3", "action": "fill", "selector": "#otp-code", "otp": "my-service" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+
+    // Verify the OTP value is 6 digits
+    let resp = execute_command(
+        &json!({ "id": "4", "action": "evaluate", "script": "document.querySelector('#otp-code').value" }),
+        &mut state,
+    )
+    .await;
+    assert_success(&resp);
+    let otp_value = get_data(&resp)["result"].as_str().unwrap_or("");
+    assert_eq!(otp_value.len(), 6, "OTP should be 6 digits, got: {}", otp_value);
+    assert!(otp_value.chars().all(|c| c.is_ascii_digit()), "OTP should contain only digits, got: {}", otp_value);
+
+    // Close
+    let resp = execute_command(&json!({ "id": "99", "action": "close" }), &mut state).await;
+    assert_success(&resp);
+}

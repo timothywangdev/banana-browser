@@ -6,6 +6,25 @@ const { URL } = require("url");
 const app = express();
 app.use(express.json());
 
+// Error simulation middleware for testing error handling
+app.use((req, res, next) => {
+  const simulate = req.query._simulate;
+  if (simulate === "timeout") {
+    // Delay response by 10 seconds to trigger timeout
+    setTimeout(() => next(), 10000);
+    return;
+  }
+  if (simulate === "slow") {
+    // Delay response by 2 seconds
+    setTimeout(() => next(), 2000);
+    return;
+  }
+  if (simulate === "error") {
+    return res.status(500).json({ detail: "Simulated internal server error" });
+  }
+  next();
+});
+
 const secretsPath = path.join(__dirname, "dev-secrets.json");
 const secrets = JSON.parse(fs.readFileSync(secretsPath, "utf-8"));
 
@@ -42,6 +61,9 @@ app.post("/v1/credentials/inject", (req, res) => {
   });
 });
 
+// Known OTP services for testing
+const otpServices = ["my-service", "test-otp", "github-otp"];
+
 app.get("/v1/otp/latest", (req, res) => {
   const auth = req.headers.authorization;
   if (!auth || !auth.startsWith("Bearer ")) {
@@ -53,11 +75,23 @@ app.get("/v1/otp/latest", (req, res) => {
     return res.status(400).json({ detail: "Missing 'service' query parameter" });
   }
 
+  // Return 404 for unknown OTP services
+  if (!otpServices.includes(service)) {
+    return res.status(404).json({ detail: `OTP key not found: ${service}` });
+  }
+
   res.json({
     code: "123456",
     source: "mock",
     received_at: new Date().toISOString(),
     expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+  });
+});
+
+app.get("/health", (req, res) => {
+  res.json({
+    status: "ok",
+    version: "1.0.0"
   });
 });
 

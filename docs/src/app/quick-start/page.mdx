@@ -92,3 +92,20 @@ agent-browser get text @e1 --json
 ```
 
 Note: The default text output is more compact and preferred for AI agents.
+
+## Demo Command (npx)
+
+Test the bot detection bypass without installing:
+
+```bash
+npx banana-browser demo
+```
+
+This runs the full demo showing how banana-browser passes bot detection tests that regular automation fails.
+
+**Validation Note:** When testing `npx banana-browser demo`, verify that:
+1. The package downloads and runs without prior installation
+2. Chrome/Chromium is auto-installed if missing (or prompts for installation)
+3. The demo opens a browser, navigates to bot detection tests, and displays results
+4. Terminal output shows pass/fail status with color formatting
+5. The process exits cleanly after displaying results
