@@ -180,7 +180,7 @@ ENVIRONMENT VARIABLES:
   AGENT_BROWSER_HEADLESS  Set to "true" for headless mode
 
 MORE INFO:
-  https://github.com/vercel-labs/agent-browser
+  https://github.com/timothywangdev/banana-browser
 `);
 }
 

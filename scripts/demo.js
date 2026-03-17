@@ -323,7 +323,7 @@ function displayFooter(options) {
   console.log('');
   console.log(chalk.dim('  Powered by Patchright - the undetectable Playwright fork'));
   console.log('');
-  console.log(chalk.cyan('  Star us on GitHub: ') + chalk.bold('https://github.com/anthropics/agentgate'));
+  console.log(chalk.cyan('  Star us on GitHub: ') + chalk.bold('https://github.com/timothywangdev/banana-browser'));
   console.log('');
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "banana-browser",
-  "version": "0.20.5",
+  "version": "0.0.1",
   "description": "Stealth browser automation that bypasses bot detection. Undetectable headless Chrome for AI agents and web scraping.",
   "type": "module",
   "files": [
@@ -49,12 +49,12 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/vercel-labs/agent-browser.git"
+    "url": "git+https://github.com/timothywangdev/banana-browser.git"
   },
   "bugs": {
-    "url": "https://github.com/vercel-labs/agent-browser/issues"
+    "url": "https://github.com/timothywangdev/banana-browser/issues"
   },
-  "homepage": "https://github.com/vercel-labs/agent-browser#readme",
+  "homepage": "https://github.com/timothywangdev/banana-browser#readme",
   "dependencies": {
     "chalk": "^5.3.0",
     "ora": "^8.0.1",

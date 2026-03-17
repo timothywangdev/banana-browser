@@ -4,8 +4,8 @@
 
 [![npm version](https://img.shields.io/npm/v/banana-browser.svg)](https://www.npmjs.com/package/banana-browser)
 [![npm downloads](https://img.shields.io/npm/dm/banana-browser.svg)](https://www.npmjs.com/package/banana-browser)
-[![License](https://img.shields.io/npm/l/banana-browser.svg)](https://github.com/vercel-labs/agent-browser/blob/main/LICENSE)
-[![GitHub stars](https://img.shields.io/github/stars/vercel-labs/agent-browser.svg?style=social)](https://github.com/vercel-labs/agent-browser)
+[![License](https://img.shields.io/npm/l/banana-browser.svg)](https://github.com/timothywangdev/banana-browser/blob/main/LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/anthropics/agentgate.svg?style=social)](https://github.com/timothywangdev/banana-browser)
 
 ---
 
@@ -56,8 +56,8 @@ npx banana-browser demo
 ### From Source
 
 ```bash
-git clone https://github.com/vercel-labs/agent-browser
-cd agent-browser
+git clone https://github.com/timothywangdev/banana-browser
+cd banana-browser
 npm install
 npm run build:native   # Requires Rust
 ```
@@ -180,9 +180,9 @@ banana-browser screenshot result.png
 
 ## Documentation
 
-- [Full Documentation](https://github.com/vercel-labs/agent-browser/tree/main/docs)
-- [MCP Skills Guide](https://github.com/vercel-labs/agent-browser/tree/main/skills)
-- [API Reference](https://github.com/vercel-labs/agent-browser/tree/main/docs)
+- [Full Documentation](https://github.com/timothywangdev/banana-browser/tree/main/docs)
+- [MCP Skills Guide](https://github.com/timothywangdev/banana-browser/tree/main/skills)
+- [API Reference](https://github.com/timothywangdev/banana-browser/tree/main/docs)
 
 ---
 
@@ -191,8 +191,8 @@ banana-browser screenshot result.png
 We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ```bash
-git clone https://github.com/vercel-labs/agent-browser
-cd agent-browser
+git clone https://github.com/timothywangdev/banana-browser
+cd banana-browser
 npm install
 npm run dev:setup
 ```
@@ -208,5 +208,5 @@ Apache-2.0 - See [LICENSE](LICENSE) for details.
 <p align="center">
   <strong>If this saves you time, consider giving us a star!</strong>
   <br>
-  <a href="https://github.com/vercel-labs/agent-browser">Star on GitHub</a>
+  <a href="https://github.com/timothywangdev/banana-browser">Star on GitHub</a>
 </p>
