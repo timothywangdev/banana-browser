@@ -1,11 +1,11 @@
 # Banana Browser
 
-**Stealth browser automation that bypasses bot detection.**
+**The browser tool for AI agents that doesn't get caught.**
 
 [![npm version](https://img.shields.io/npm/v/banana-browser.svg)](https://www.npmjs.com/package/banana-browser)
 [![npm downloads](https://img.shields.io/npm/dm/banana-browser.svg)](https://www.npmjs.com/package/banana-browser)
 [![License](https://img.shields.io/npm/l/banana-browser.svg)](https://github.com/timothywangdev/banana-browser/blob/main/LICENSE)
-[![GitHub stars](https://img.shields.io/github/stars/anthropics/agentgate.svg?style=social)](https://github.com/timothywangdev/banana-browser)
+[![GitHub stars](https://img.shields.io/github/stars/timothywangdev/banana-browser.svg?style=social)](https://github.com/timothywangdev/banana-browser)
 
 ---
 
@@ -15,180 +15,161 @@
 
 ---
 
+## The Problem
+
+AI agents that browse the web hit three walls:
+
+1. **Bot detection** - Playwright and Puppeteer get flagged by Cloudflare, reCAPTCHA, and DataDome. Agents get stuck on CAPTCHAs or blocked entirely.
+
+2. **Credential exposure** - When an agent logs into a website, the password flows through the LLM context, gets sent to the API, and sits in conversation history. Security hole.
+
+3. **CAPTCHAs** - Even with stealth, CAPTCHAs still appear. Agents can't solve them. Users have to intervene manually.
+
+---
+
+## The Solution
+
+Banana Browser is a fork of [agent-browser](https://github.com/vercel-labs/agent-browser) with three capabilities no other self-hosted tool offers:
+
+| Capability | Status | How |
+|------------|--------|-----|
+| **Anti-detection** | Ready | Patchright removes CDP leaks that trigger bot detection |
+| **Secure credentials** | Ready | `--secret` flag injects passwords without LLM exposure |
+| **CAPTCHA solving** | Planned | Auto-solve via 2Captcha/CapSolver |
+
+---
+
 ## Try It Now
 
 ```bash
 npx banana-browser demo
 ```
 
-That's it. Watch your browser pass every bot detection test.
+Watch your browser pass every bot detection test.
 
 ---
 
-## What It Does
+## Who It's For
 
-Banana Browser is a headless Chrome that's **invisible to bot detection**. It uses Patchright (an undetectable Playwright fork) to pass fingerprint checks, Cloudflare, and anti-bot systems that block regular automation tools.
+Self-hosted AI agent platforms:
 
-Perfect for AI agents, web scraping, and automation that needs to look human.
+- **OpenClaw** - The fastest-growing AI agent repo
+- **NanoClaw** - Lightweight agent framework
+- **OpenHands**, **browser-use**, and similar frameworks
+- Anyone running AI agents in containers who needs web browsing
+
+These users chose self-hosted for privacy. They won't pay $50+/month for Browserbase. Banana Browser is free and runs locally.
 
 ---
 
 ## Installation
 
-### Quick Install (recommended)
-
 ```bash
 npm install -g banana-browser
+banana-browser install   # Downloads Chromium
 ```
 
-The native Rust binary downloads automatically. Then install Chrome:
-
-```bash
-banana-browser install
-```
-
-### One-liner Demo (no install needed)
+Or try without installing:
 
 ```bash
 npx banana-browser demo
-```
-
-### From Source
-
-```bash
-git clone https://github.com/timothywangdev/banana-browser
-cd banana-browser
-npm install
-npm run build:native   # Requires Rust
 ```
 
 ---
 
 ## Quick Start
 
-### Run the Bot Detection Demo
-
 ```bash
+# Run the bot detection demo
 banana-browser demo
-```
 
-Opens a browser, navigates to bot detection tests, and shows you the results in your terminal.
-
-### Start the Browser Daemon
-
-```bash
-banana-browser start
-```
-
-### Navigate to a URL
-
-```bash
+# Navigate to a page
 banana-browser open https://example.com
-```
 
-### Take a Screenshot
+# Fill a form (password never touches LLM context)
+banana-browser fill "#email" "user@example.com"
+banana-browser fill "#password" --secret GITHUB_PASSWORD
 
-```bash
-banana-browser screenshot https://example.com -o screenshot.png
-```
-
-### Check Your Setup
-
-```bash
-banana-browser --version
+# Take a screenshot
+banana-browser screenshot result.png
 ```
 
 ---
 
-## Features
+## Bot Detection Results
 
-- **Undetectable** - Passes Cloudflare, DataDome, PerimeterX, and fingerprint tests
-- **Fast** - Native Rust CLI, no Node.js runtime overhead for the daemon
-- **Simple** - Single binary, zero configuration required
-- **AI-Ready** - Built for AI agents with structured output and MCP integration
-- **Cross-Platform** - Works on macOS (Intel + ARM), Linux, and Windows
-
----
-
-## Comparison: Regular Automation vs Banana Browser
-
-| Bot Detection Test | Puppeteer | Playwright | Banana Browser |
-|--------------------|-----------|------------|----------------|
+| Test | Puppeteer | Playwright | Banana Browser |
+|------|-----------|------------|----------------|
 | navigator.webdriver | FAIL | FAIL | PASS |
 | Chrome headless detection | FAIL | FAIL | PASS |
 | Fingerprint consistency | FAIL | FAIL | PASS |
 | Cloudflare challenge | FAIL | FAIL | PASS |
 | DataDome | FAIL | FAIL | PASS |
 
+Powered by [Patchright](https://github.com/AzaelDiaz/patchright) - the undetectable Playwright fork.
+
+---
+
+## Secure Credential Injection
+
+The `--secret` flag reads credentials from a local file and injects them directly into form fields. **The LLM never sees the password.**
+
+```bash
+# The agent runs this command
+banana-browser fill "#password" --secret GITHUB_PASSWORD
+
+# The agent's output shows
+"Filled password field using stored credential"
+
+# The actual password
+Never appears in any LLM context, log, or API call
+```
+
+**Security features:**
+
+- Secret values never written to stdout
+- Mandatory URL allowlisting (secrets only work on specified domains)
+- Audit logging
+
 ---
 
 ## CLI Commands
 
-### Core Commands
-
 | Command | Description |
 |---------|-------------|
-| `banana-browser demo` | Run bot detection tests and show results |
-| `banana-browser install` | Install Chromium for automation |
-| `banana-browser open <url>` | Navigate to a URL |
-| `banana-browser screenshot [path]` | Take a screenshot |
-| `banana-browser close` | Close the browser |
-| `banana-browser --version` | Show version info |
-| `banana-browser --help` | Show all commands |
-
-### Interaction Commands
-
-| Command | Description |
-|---------|-------------|
-| `banana-browser click <selector>` | Click an element |
-| `banana-browser fill <selector> <text>` | Fill a form field |
-| `banana-browser type <text>` | Type text into focused element |
-
-### Demo Options
-
-| Option | Description |
-|--------|-------------|
-| `--headless` | Run demo in headless mode |
-| `--quiet` | Suppress promotional output |
-| `--screenshot <path>` | Save screenshot of results |
-
-### Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| `AGENT_BROWSER_ENGINE=patchright` | Use Patchright anti-detection engine |
-| `AGENT_BROWSER_HEADLESS=true` | Run in headless mode |
-
-### Examples
-
-```bash
-# Run the bot detection demo
-banana-browser demo
-
-# Open a page with anti-detection
-AGENT_BROWSER_ENGINE=patchright banana-browser open https://bot.sannysoft.com
-
-# Automate a form
-banana-browser open https://example.com/form
-banana-browser fill "#email" "user@example.com"
-banana-browser fill "#password" "secret"
-banana-browser click "button[type=submit]"
-banana-browser screenshot result.png
-```
+| `banana-browser demo` | Run bot detection tests |
+| `banana-browser install` | Install Chromium |
+| `banana-browser open <url>` | Navigate to URL |
+| `banana-browser click <selector>` | Click element |
+| `banana-browser fill <selector> <text>` | Fill form field |
+| `banana-browser fill <selector> --secret KEY` | Fill from secrets file |
+| `banana-browser screenshot [path]` | Take screenshot |
+| `banana-browser close` | Close browser |
+| `banana-browser --version` | Show version |
 
 ---
 
-## Documentation
+## Environment Variables
 
-- [Full Documentation](https://github.com/timothywangdev/banana-browser/tree/main/docs)
-- [MCP Skills Guide](https://github.com/timothywangdev/banana-browser/tree/main/skills)
-- [API Reference](https://github.com/timothywangdev/banana-browser/tree/main/docs)
+| Variable | Description |
+|----------|-------------|
+| `AGENT_BROWSER_ENGINE=patchright` | Use Patchright anti-detection |
+| `AGENT_BROWSER_HEADLESS=true` | Run headless |
+| `BB_SECRETS_FILE=/path/to/secrets.json` | Path to secrets file |
+
+---
+
+## Roadmap
+
+- [x] Anti-detection via Patchright
+- [x] Secure credential injection (`--secret`)
+- [ ] Automatic CAPTCHA solving (2Captcha, CapSolver)
+- [ ] Snapshot sanitization (prevent prompt injection via hidden text)
+- [ ] MCP server mode
 
 ---
 
 ## Contributing
-
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ```bash
 git clone https://github.com/timothywangdev/banana-browser
@@ -196,6 +177,8 @@ cd banana-browser
 npm install
 npm run dev:setup
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ---
 
@@ -206,7 +189,7 @@ Apache-2.0 - See [LICENSE](LICENSE) for details.
 ---
 
 <p align="center">
-  <strong>If this saves you time, consider giving us a star!</strong>
+  <strong>If this saves you time, give us a star!</strong>
   <br>
   <a href="https://github.com/timothywangdev/banana-browser">Star on GitHub</a>
 </p>
