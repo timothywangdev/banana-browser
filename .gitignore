@@ -56,3 +56,4 @@ docs/package-lock.json
 
 # pnpm
 .pnpm-store/
+.npmrc

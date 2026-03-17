@@ -168,7 +168,7 @@ function installDependencies() {
  * Build patchright-adapter if it exists
  */
 function buildPatchrightAdapter() {
-  const adapterDir = join(rootDir, '..', 'patchright-adapter');
+  const adapterDir = join(rootDir, 'patchright-adapter');
 
   if (!existsSync(adapterDir)) {
     logSuccess('Skipping patchright-adapter (not present)');

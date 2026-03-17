@@ -112,7 +112,7 @@ async function showVersion() {
   }
 
   // patchright-adapter version
-  const adapterPackageJson = join(projectRoot, '..', 'patchright-adapter', 'package.json');
+  const adapterPackageJson = join(projectRoot, 'patchright-adapter', 'package.json');
   if (existsSync(adapterPackageJson)) {
     try {
       const adapterPkg = JSON.parse(readFileSync(adapterPackageJson, 'utf8'));

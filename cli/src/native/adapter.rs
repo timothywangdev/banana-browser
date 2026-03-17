@@ -237,16 +237,17 @@ impl PatchrightAdapter {
             }
         }
 
-        // Try relative to the executable
+        // Try relative to the executable (for npm global install or local binary)
         if let Ok(exe_path) = std::env::current_exe() {
-            // Go up from banana-browser/cli/target/[debug|release]/agent-browser
-            // to the agentgate root, then into patchright-adapter
+            // For npm install: binary is in node_modules/.bin or bin/
+            // Adapter should be in the same package at patchright-adapter/
             let mut path = exe_path;
-            for _ in 0..5 {
+            for _ in 0..6 {
                 path = match path.parent() {
                     Some(p) => p.to_path_buf(),
                     None => break,
                 };
+                // Check for adapter inside the package (self-contained)
                 let adapter_js = path.join("patchright-adapter/dist/index.js");
                 if adapter_js.exists() {
                     return Ok(path.join("patchright-adapter"));
@@ -261,7 +262,7 @@ impl PatchrightAdapter {
             return Ok(adapter_path);
         }
 
-        // Try parent directories
+        // Try parent directories (for development)
         let mut path = cwd;
         for _ in 0..5 {
             path = match path.parent() {
@@ -274,7 +275,7 @@ impl PatchrightAdapter {
             }
         }
 
-        Err("Could not find patchright-adapter. Set PATCHRIGHT_ADAPTER_PATH or ensure dist/index.js exists.".to_string())
+        Err("Could not find patchright-adapter. Run 'npm run build' in the banana-browser directory or set PATCHRIGHT_ADAPTER_PATH.".to_string())
     }
 
     /// Spawn a new Patchright adapter process
